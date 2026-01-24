@@ -1552,7 +1552,7 @@
         function generaPDF() {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
-            doc.setFontSize(18); doc.text("REPORT TURNO IBG", 20, 20);
+            doc.setFontSize(18); doc.text("REPORT TURNO", 20, 20);
             doc.setFontSize(12);
             doc.text(`Data: ${ultimoCalcolo.data}`, 20, 35);
             doc.text(`Prestazione: ${ultimoCalcolo.tipo}`, 20, 45);
@@ -1565,7 +1565,7 @@
             }
             doc.text(`--------------------------------------------------`, 20, 105);
             doc.text(`LORDO TOTALE: EUR ${ultimoCalcolo.totale.toFixed(2)}`, 20, 115);
-            doc.save(`IBG_${ultimoCalcolo.data}.pdf`);
+            doc.save(`Turno_${ultimoCalcolo.data}.pdf`);
         }
 
         // ========== IMPOSTAZIONI ==========
