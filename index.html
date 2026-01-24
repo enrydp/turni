@@ -1,0 +1,1663 @@
+<!DOCTYPE html>
+<html lang="it">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IBG Controllo Turni - Cloud & PDF</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-firestore-compat.js"></script>
+
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --success: #27ae60;
+            --accent: #3498db;
+            --danger: #e74c3c;
+            --gray: #95a5a6;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f0f2f5;
+            margin: 0;
+            padding: 15px;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: var(--primary);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            position: relative;
+        }
+
+        .settings-btn {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            cursor: pointer;
+            font-size: 22px;
+        }
+
+        .content {
+            padding: 20px;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            font-size: 0.9em;
+            color: #444;
+        }
+
+        input,
+        select,
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+            margin-top: 10px;
+        }
+
+        .btn-calc {
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-save {
+            background: var(--accent);
+            color: white;
+            display: none;
+        }
+
+        .btn-pdf {
+            background: var(--primary);
+            color: white;
+            display: none;
+        }
+
+        #modalSettings {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 100;
+            overflow-y: auto;
+        }
+
+        .modal-content {
+            background: white;
+            width: 90%;
+            max-width: 550px;
+            margin: 30px auto;
+            padding: 0;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .modal-header {
+            background: var(--primary);
+            color: white;
+            padding: 20px;
+        }
+
+        .tab-container {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 2px solid #ddd;
+            overflow-x: auto;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 12px 15px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            color: #666;
+            transition: 0.3s;
+            white-space: nowrap;
+        }
+
+        .tab-btn:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+
+        .tab-btn.active {
+            background: white;
+            color: var(--primary);
+            border-bottom: 3px solid var(--primary);
+        }
+
+        .tab-content {
+            display: none;
+            padding: 25px;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .payslip-preview {
+            max-width: 100%;
+            max-height: 200px;
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            margin: 10px 0;
+            object-fit: contain;
+        }
+
+        .payslip-item {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            font-size: 0.85em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .payslip-item.active {
+            background: #e8f4fd;
+            border: 2px solid var(--accent);
+        }
+
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            background: #f8f9fa;
+            display: none;
+            border-left: 5px solid var(--success);
+        }
+
+        .history {
+            margin-top: 25px;
+            border-top: 2px solid #eee;
+            padding-top: 15px;
+        }
+
+        .history-item {
+            font-size: 0.85em;
+            border-bottom: 1px solid #eee;
+            padding: 8px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .cloud-badge {
+            font-size: 10px;
+            background: #e8f4fd;
+            color: var(--accent);
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 5px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <div class="header">
+            <span class="settings-btn" onclick="toggleSettings()">⚙️</span>
+            <h2 style="margin:0">Registrazione turni</h2>
+            <div id="statusCloud" style="font-size: 10px; margin-top: 5px; opacity: 0.8;">Offline Mode (Local)</div>
+        </div>
+
+        <div class="content">
+            <div class="input-group">
+                <input type="hidden" id="editId">
+                <label>Data Turno</label>
+                <input type="date" id="dataTurno">
+            </div>
+
+            <div class="input-group">
+                <label>Tipo Turno</label>
+                <select id="tipoTurno" onchange="impostaOrariTurno()">
+                    <option id="optMattina" value="mattina">Mattina</option>
+                    <option id="optPomeriggio" value="pomeriggio">Pomeriggio</option>
+                    <option id="optNotte" value="notte">Notte</option>
+                    <option value="centrale">Centrale (08:00 - 17:00)</option>
+                    <option value="ferie">Ferie</option>
+                    <option value="permesso">Permesso Retribuito</option>
+                    <option value="malattia">Malattia</option>
+                </select>
+            </div>
+
+            <div id="orariDiv" class="input-group" style="display:flex; gap:10px;">
+                <div style="flex:1">
+                    <label>Inizio</label>
+                    <input type="time" id="inizio" value="06:00">
+                </div>
+                <div style="flex:1">
+                    <label>Fine</label>
+                    <input type="time" id="fine" value="14:00">
+                </div>
+            </div>
+
+            <div class="input-group" id="straordinarioDiv" style="display:flex; gap:10px;">
+                <div style="flex:1">
+                    <label>Straordinari (ore)</label>
+                    <input type="number" id="oreStraordinario" step="0.5" value="0" min="0">
+                </div>
+                <div style="flex:1">
+                    <label>Ferie/Permesso (ore)</label>
+                    <input type="number" id="oreFerie" step="0.5" value="0" min="0">
+                </div>
+            </div>
+
+            <button id="btnSave" class="btn-save" onclick="salvaTurno()"
+                style="display:block; width:100%; margin-top:20px; background:var(--primary);">💾 Salva Turno</button>
+            <button id="btnPdf" class="btn-pdf" onclick="generaPDF()" style="margin-top:10px;">📄 Esporta PDF Ultimo
+                Turno</button>
+
+            <div id="result"></div>
+
+            <div class="history">
+                <div
+                    style="background:#f8f9fa; padding:10px; border-radius:8px; margin-bottom:15px; border:1px solid #eee; display:flex; gap:10px; align-items:flex-end;">
+                    <div style="flex:1">
+                        <label style="font-size:0.85em; font-weight:bold; color:#555;">📅 Seleziona Mese</label>
+                        <input type="month" id="filtroMese" onchange="renderStorico()"
+                            style="width:100%; padding:8px; border:1px solid #ddd; border-radius:6px; margin-top:5px;">
+                    </div>
+                    <button onclick="generaReportPDF()"
+                        style="background:#2c3e50; color:white; border:none; padding:10px 15px; border-radius:6px; cursor:pointer; height:36px; margin-bottom:1px;">
+                        📄 Report
+                    </button>
+                </div>
+
+                <!-- STATS DASHBOARD -->
+                <div id="statsDashboard"
+                    style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:15px;">
+                    <button onclick="filterByStat('ord')" id="statOrd"
+                        style="background:#eaf2f8; border:1px solid #d6eaf8; padding:10px; border-radius:8px; cursor:pointer; text-align:center;">
+                        <div style="font-size:0.75em; color:#555;">ORDINARIE</div>
+                        <div style="font-weight:bold; color:#2980b9;" id="valOrd">0h</div>
+                    </button>
+                    <button onclick="filterByStat('stra')" id="statStra"
+                        style="background:#fef5e7; border:1px solid #fae5d3; padding:10px; border-radius:8px; cursor:pointer; text-align:center;">
+                        <div style="font-size:0.75em; color:#555;">STRAORD.</div>
+                        <div style="font-weight:bold; color:#e67e22;" id="valStra">0h</div>
+                    </button>
+                    <button onclick="filterByStat('nott')" id="statNott"
+                        style="background:#f4ecf7; border:1px solid #ebdef0; padding:10px; border-radius:8px; cursor:pointer; text-align:center;">
+                        <div style="font-size:0.75em; color:#555;">NOTTURNE</div>
+                        <div style="font-weight:bold; color:#8e44ad;" id="valNott">0h</div>
+                    </button>
+                    <button onclick="filterByStat('ferie')" id="statFerie"
+                        style="background:#e8f8f5; border:1px solid #d1f2eb; padding:10px; border-radius:8px; cursor:pointer; text-align:center;">
+                        <div style="font-size:0.75em; color:#555;">FERIE/PERM</div>
+                        <div style="font-weight:bold; color:#27ae60;" id="valFerie">0h</div>
+                    </button>
+                </div>
+
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <strong>Storico Turni</strong>
+                    <span id="totaleMensile" style="font-weight:bold; color:var(--success)">€ 0.00</span>
+                </div>
+                <div id="listaStorico"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="modalSettings">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 style="margin:0">⚙️ Impostazioni Avanzate</h3>
+            </div>
+
+            <div class="tab-container">
+                <button class="tab-btn active" onclick="switchTab('parametri')">📊 Parametri</button>
+                <button class="tab-btn" onclick="switchTab('bustapaga')">💰 Busta Paga</button>
+                <button class="tab-btn" onclick="switchTab('backup')">💾 Backup</button>
+                <button class="tab-btn" onclick="switchTab('firebase')">☁️ Cloud & AI</button>
+            </div>
+
+            <!-- TAB PARAMETRI -->
+            <div id="tab-parametri" class="tab-content active">
+                <h4 style="margin-top:0">Parametri Salariali Base</h4>
+                <div class="input-group">
+                    <label>Paga Base Oraria (€)</label>
+                    <input type="number" id="pagaBase" step="0.00001">
+                </div>
+                <div class="input-group">
+                    <label>Maggiorazione Straordinario (%)</label>
+                    <input type="number" id="maggStraord" step="0.01" value="45">
+                    <small style="color:#777">Es: 45 per il 45% di maggiorazione sabato</small>
+                </div>
+                <div class="input-group">
+                    <label>Indennità Notturna (Oraria)</label>
+                    <input type="number" id="indNotturna" step="0.01">
+                </div>
+
+                <div class="input-group">
+                    <label>Indennità Turno (Oraria)</label>
+                    <input type="number" id="indTurno" step="0.01">
+                </div>
+
+                <div class="input-group" style="background:#f9f9f9; padding:10px; border-radius:5px; margin-top:5px;">
+                    <label style="margin-bottom:5px; display:block;">Applica Indennità Turno su:</label>
+                    <div style="display:flex; gap:10px; font-size:0.9em;">
+                        <label><input type="checkbox" id="checkIndMattina" checked> Mattina</label>
+                        <label><input type="checkbox" id="checkIndPomeriggio" checked> Pomeriggio</label>
+                        <label><input type="checkbox" id="checkIndNotte" checked> Notte</label>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label>Ticket Mensa (Giornaliero)</label>
+                    <input type="number" id="ticketMensa" step="0.01">
+                </div>
+
+                <div class="input-group">
+                    <label>Indennità Festiva (Oraria)</label>
+                    <input type="number" id="indFestiva" step="0.01">
+                </div>
+
+                <!-- Scatti Anzianità Removed from UI as requested -->
+                <input type="hidden" id="scattiAnz">
+
+                <div class="input-group" style="margin-top:15px; border-top:1px dashed #ccc; padding-top:10px;">
+                    <label>Inizio Primo Turno (Mattina)</label>
+                    <select id="shiftStart">
+                        <option value="06:00">06:00 (Standard)</option>
+                        <option value="08:00">08:00 (Posticipato)</option>
+                    </select>
+                </div>
+                <p style="font-size: 11px; color: #777; background:#fff3cd; padding:10px; border-radius:6px;">
+                    💡 <strong>Nota:</strong> Se il turno inizia tra le 22 e le 06, l'app calcola il notturno su
+                    tutto
+                    il turno (8 ore).
+                </p>
+            </div>
+
+            <!-- TAB BUSTA PAGA -->
+            <div id="tab-bustapaga" class="tab-content">
+                <h4 style="margin-top:0">Analisi Busta Paga</h4>
+                <p style="font-size:0.9em; color:#666;">Carica una busta paga per estrarre automaticamente i
+                    componenti
+                    salariali e migliorare la precisione dei calcoli.</p>
+
+                <div
+                    style="border: 2px dashed #ddd; border-radius: 8px; padding: 20px; text-align: center; margin: 15px 0;">
+                    <div style="display:flex; gap:10px; justify-content:center;">
+                        <button onclick="document.getElementById('payslipInput').click()"
+                            style="background:var(--accent); color:white; font-size:14px; margin:0; flex:1;">
+                            📄 Carica File (PDF/IMG)
+                        </button>
+                    </div>
+
+                    <input type="file" id="payslipInput" accept="image/*,.pdf" style="display:none"
+                        onchange="caricaBustaPaga(event)">
+                    <p style="font-size:0.8em; color:#999; margin-top:10px;">Formati supportati: PDF, JPG, PNG</p>
+                </div>
+
+                <!-- GEMINI ANALYZE BUTTON -->
+                <div id="geminiAction" style="display:none; margin-bottom:20px;">
+                    <button onclick="analizzaConGemini()"
+                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:white; font-weight:bold; border:none; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
+                        ✨ Estrai Dati con Gemini AI
+                    </button>
+                    <div id="geminiLoading" style="display:none; text-align:center; padding:10px; color:#667eea;">
+                        <span style="display:inline-block; animation: spin 1s linear infinite;">⏳</span> Analisi in
+                        corso... attendere...
+                    </div>
+                </div>
+
+                <div id="payslipPreviewContainer" style="display:none; margin:15px 0;">
+                    <label style="font-weight:600; margin-bottom:8px; display:block;">Anteprima Documento</label>
+                    <img id="payslipPreview" class="payslip-preview" alt="Anteprima busta paga">
+                </div>
+
+                <div id="payslipFormContainer" style="display:none;">
+                    <h5 style="margin-top:20px; margin-bottom:10px;">Inserisci i Componenti Salariali</h5>
+                    <div class="input-group">
+                        <label>Paga Base Oraria (€)</label>
+                        <input type="number" id="payslip_pagaBase" step="0.00001">
+                    </div>
+                    <div class="input-group">
+                        <label>Maggiorazione Straordinario (%)</label>
+                        <input type="number" id="payslip_maggStraord" step="0.01" value="45">
+                    </div>
+                    <div class="input-group">
+                        <label>Indennità Notturna (€/ora)</label>
+                        <input type="number" id="payslip_indNotturna" step="0.00001">
+                    </div>
+                    <div class="input-group">
+                        <label>Maggiorazione Turni (€/ora)</label>
+                        <input type="number" id="payslip_indTurno" step="0.00001">
+                    </div>
+                    <div class="input-group">
+                        <label>Ticket Mensa (€/giorno)</label>
+                        <input type="number" id="payslip_ticketMensa" step="0.01">
+                    </div>
+                    <div class="input-group">
+                        <label>Indennità Festiva (€/ora) <small style="color:#999">(opzionale)</small></label>
+                        <input type="number" id="payslip_indFestiva" step="0.00001" value="0">
+                    </div>
+                    <div class="input-group">
+                        <label>Scatti Anzianità (€/mese) <small style="color:#999">(opzionale)</small></label>
+                        <input type="number" id="payslip_scattiAnz" step="0.01" value="0">
+                    </div>
+                    <div class="input-group">
+                        <label>Data Riferimento Busta Paga</label>
+                        <input type="month" id="payslip_data">
+                    </div>
+                    <button onclick="salvaBustaPaga()" style="background:var(--success); color:white; margin-top:10px;">
+                        ✅ Salva Componenti
+                    </button>
+                </div>
+
+                <div id="payslipHistoryContainer" style="margin-top:25px;">
+                    <h5 style="margin-bottom:10px;">Buste Paga Salvate</h5>
+                    <div id="payslipHistory"></div>
+                </div>
+            </div>
+
+            <!-- TAB BACKUP -->
+            <div id="tab-backup" class="tab-content">
+                <h4 style="margin-top:0">Gestione Backup</h4>
+                <p style="font-size:0.9em; color:#666;">Esporta e ripristina tutti i tuoi dati (turni, impostazioni,
+                    buste paga).</p>
+
+                <div style="display: flex; gap: 10px; margin: 20px 0;">
+                    <button onclick="esportaBackup()"
+                        style="background:var(--gray); color:white; font-size:14px; margin:0; flex:1;">
+                        📥 Esporta Backup
+                    </button>
+                    <button onclick="document.getElementById('fileInput').click()"
+                        style="background:var(--gray); color:white; font-size:14px; margin:0; flex:1;">
+                        📤 Ripristina Backup
+                    </button>
+                </div>
+                <input type="file" id="fileInput" style="display:none" onchange="importaBackup(event)">
+
+                <div style="background:#fff3cd; padding:12px; border-radius:8px; margin-top:15px;">
+                    <strong>⚠️ Importante:</strong>
+                    <ul style="margin:8px 0; padding-left:20px; font-size:0.85em;">
+                        <li>Il backup include tutti i turni, impostazioni e buste paga</li>
+                        <li>Il ripristino sovrascriverà tutti i dati attuali</li>
+                        <li>Esegui backup regolari per non perdere i tuoi dati</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- TAB FIREBASE -->
+            <div id="tab-firebase" class="tab-content">
+                <h4 style="margin-top:0">Configurazione Cloud & AI</h4>
+
+                <div class="input-group">
+                    <label>Gemini API Key (per lettura automatica)</label>
+                    <input type="password" id="geminiApiKey" placeholder="Incolla qui la tua API Key">
+                    <small style="color:#666">Ottienila gratis su <a href="https://aistudio.google.com"
+                            target="_blank">Google AI Studio</a></small>
+                </div>
+
+                <div class="input-group">
+                    <label>Modello Gemini (es. gemini-1.5-flash)</label>
+                    <div style="display:flex; gap:5px;">
+                        <input type="text" id="geminiModel" placeholder="gemini-1.5-flash" style="display:none;">
+                        <select id="geminiModelSelect" style="flex:1;">
+                            <option value="gemini-1.5-flash" selected>gemini-1.5-flash</option>
+                            <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                            <option value="gemini-1.0-pro">gemini-1.0-pro</option>
+                        </select>
+                        <button onclick="checkGeminiModels()"
+                            style="background:#667eea; color:white; width:auto; padding:0 15px; margin:0; font-size:12px;">🔍
+                            Aggiorna</button>
+                    </div>
+                </div>
+
+                <hr style="margin:20px 0; border:0; border-top:1px solid #ddd;">
+
+                <p style="font-size:0.9em; color:#666;">Cloud Sync (Firebase)</p>
+                <div class="input-group">
+                    <label>Firebase Config (JSON)</label>
+                    <textarea id="fbConfig" placeholder='Incolla qui il codice {"apiKey":...}' rows="6"></textarea>
+                </div>
+
+                <div style="background:#e8f4fd; padding:12px; border-radius:8px; margin-top:15px;">
+                    <strong>ℹ️ Come configurare:</strong>
+                    <ol style="margin:8px 0; padding-left:20px; font-size:0.85em;">
+                        <li>Crea un progetto su <a href="https://console.firebase.google.com" target="_blank">Firebase
+                                Console</a></li>
+                        <li>Abilita Firestore Database</li>
+                        <li>Copia la configurazione web (oggetto JSON)</li>
+                    </ol>
+                </div>
+            </div>
+
+            <div style="padding: 20px; border-top: 2px solid #eee; background:#f8f9fa;">
+                <button onclick="salvaImpostazioni()" style="background:var(--primary); color:white; margin:0;">
+                    💾 Salva e Riavvia
+                </button>
+                <button onclick="toggleSettings()"
+                    style="background:none; color:var(--danger); font-size:13px; border:1px solid var(--danger);">
+                    ❌ Annulla
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let db = null;
+        let params = {
+            pagaBase: 13.46942,
+            maggStraord: 1.45,
+            indNotturna: 2.71236,
+            indTurno: 0.83954,
+            ticketMensa: 3.00,
+            indFestiva: 12.97572,
+            scattiAnz: 145.30,
+            fbConfig: "",
+            geminiApiKey: "",
+            geminiModel: "gemini-1.5-flash",
+            payslips: [],
+            shiftStart: "06:00",
+            indemnities: { mattina: true, pomeriggio: true, notte: true }
+        };
+        let storico = [];
+        let ultimoCalcolo = {};
+        let currentPayslipFile = null;
+
+        window.onload = function () {
+            const savedParams = localStorage.getItem('paramsIBG');
+            if (savedParams) {
+                params = JSON.parse(savedParams);
+                // Retrocompatibilità
+                if (params.maggStraord > 10) params.maggStraord = ((params.maggStraord - 1) * 100);
+                if (!params.payslips) params.payslips = [];
+                if (!params.indemnities) params.indemnities = { mattina: true, pomeriggio: true, notte: true };
+                if (!params.shiftStart) params.shiftStart = "06:00";
+            }
+
+            aggiornaCampiSettings();
+            updateShiftLabels(); // Update labels based on settings
+
+            // Set default month to current
+            const now = new Date();
+            const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            document.getElementById('filtroMese').value = monthStr;
+
+            if (params.fbConfig) {
+                // Firebase handles its own IDs usually, but checking anyway
+                try {
+                    const config = JSON.parse(params.fbConfig);
+                    firebase.initializeApp(config);
+                    db = firebase.firestore();
+                    document.getElementById('statusCloud').innerText = "☁️ Cloud Sync Attivo";
+                    caricaDaFirebase();
+                } catch (e) {
+                    alert("Errore configurazione Firebase. Controlla il JSON.");
+                }
+            } else {
+                const savedStorico = localStorage.getItem('storicoIBG');
+                if (savedStorico) {
+                    storico = JSON.parse(savedStorico);
+                    // MIGRATION: Fix empty IDs
+                    let dirty = false;
+                    storico.forEach((item, index) => {
+                        if (!item.id || item.id === "") {
+                            item.id = "migrated_" + Date.now() + "_" + index;
+                            dirty = true;
+                        }
+                    });
+                    if (dirty) localStorage.setItem('storicoIBG', JSON.stringify(storico));
+                }
+                renderStorico();
+            }
+
+            renderPayslipHistory();
+            renderStorico(); // Ensure stats are calculated on load
+            document.getElementById('dataTurno').valueAsDate = new Date();
+        };
+
+        // ========== GESTIONE GUI ==========
+        function updateShiftLabels() {
+            const startMode = params.shiftStart || "06:00";
+            let baseH = parseInt(startMode.split(':')[0]);
+
+            const mStart = String(baseH).padStart(2, '0') + ":00";
+            const mEnd = String((baseH + 8) % 24).padStart(2, '0') + ":00";
+            document.getElementById('optMattina').innerText = `Mattina (${mStart} - ${mEnd})`;
+
+            const pStart = mEnd;
+            const pEnd = String((baseH + 16) % 24).padStart(2, '0') + ":00";
+            document.getElementById('optPomeriggio').innerText = `Pomeriggio (${pStart} - ${pEnd})`;
+
+            const nStart = pEnd;
+            const nEnd = String((baseH + 24) % 24).padStart(2, '0') + ":00";
+            document.getElementById('optNotte').innerText = `Notte (${nStart} - ${nEnd})`;
+
+            // Also refresh current time inputs if they match a standard type
+            impostaOrariTurno();
+        }
+
+        function impostaOrariTurno() {
+            const tipo = document.getElementById('tipoTurno').value;
+            const startMode = params.shiftStart || "06:00";
+
+            const inizio = document.getElementById('inizio');
+            const fine = document.getElementById('fine');
+            const ferieDiv = document.getElementById('oreFerie');
+            const orariDiv = document.getElementById('orariDiv');
+            const straordinarioDiv = document.getElementById('straordinarioDiv');
+
+            // Reset visibility
+            orariDiv.style.opacity = "1";
+            ferieDiv.value = 0;
+            straordinarioDiv.style.opacity = "1";
+            straordinarioDiv.style.pointerEvents = "auto";
+
+            // Define base offsets from startMode
+            let baseH = parseInt(startMode.split(':')[0]); // 6 or 0
+
+            switch (tipo) {
+                case 'mattina':
+                    inizio.value = String(baseH).padStart(2, '0') + ":00";
+                    fine.value = String((baseH + 8) % 24).padStart(2, '0') + ":00";
+                    break;
+                case 'pomeriggio':
+                    inizio.value = String((baseH + 8) % 24).padStart(2, '0') + ":00";
+                    fine.value = String((baseH + 16) % 24).padStart(2, '0') + ":00";
+                    break;
+                case 'notte':
+                    inizio.value = String((baseH + 16) % 24).padStart(2, '0') + ":00";
+                    fine.value = String((baseH + 24) % 24).padStart(2, '0') + ":00";
+                    break;
+                case 'centrale':
+                    inizio.value = "08:00";
+                    fine.value = "17:00";
+                    break;
+                case 'ferie':
+                case 'permesso':
+                case 'malattia':
+                    orariDiv.style.opacity = "0.5";
+                    ferieDiv.value = 8;
+                    // Hide straordinario field for these types
+                    straordinarioDiv.style.opacity = "0.5";
+                    straordinarioDiv.style.pointerEvents = "none";
+                    document.getElementById('oreStraordinario').value = 0;
+                    break;
+            }
+        }
+
+        // ========== GESTIONE TAB ==========
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tabName).classList.add('active');
+        }
+
+        // ========== GESTIONE BUSTA PAGA ==========
+        function caricaBustaPaga(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            currentPayslipFile = file;
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                if (file.type.startsWith('image/')) {
+                    document.getElementById('payslipPreview').src = e.target.result;
+                    document.getElementById('payslipPreviewContainer').style.display = 'block';
+                } else {
+                    document.getElementById('payslipPreviewContainer').style.display = 'none';
+                }
+                document.getElementById('payslipFormContainer').style.display = 'block';
+                document.getElementById('geminiAction').style.display = 'block'; // Show Analyze Button
+                const activePay = getActivePayslip();
+                if (activePay) {
+                    document.getElementById('payslip_pagaBase').value = activePay.components.pagaBase;
+                    document.getElementById('payslip_maggStraord').value = activePay.components.maggStraord * 100;
+                    document.getElementById('payslip_indNotturna').value = activePay.components.indNotturna;
+                    document.getElementById('payslip_indTurno').value = activePay.components.indTurno || 0;
+                    document.getElementById('payslip_ticketMensa').value = activePay.components.ticketMensa || 0;
+                    document.getElementById('payslip_indFestiva').value = activePay.components.indFestiva || 0;
+                    document.getElementById('payslip_scattiAnz').value = activePay.components.scattiAnz || 0;
+                } else {
+                    document.getElementById('payslip_pagaBase').value = params.pagaBase;
+                    document.getElementById('payslip_maggStraord').value = params.maggStraord * 100;
+                    document.getElementById('payslip_indNotturna').value = params.indNotturna;
+                    document.getElementById('payslip_indTurno').value = params.indTurno || 0;
+                    document.getElementById('payslip_ticketMensa').value = params.ticketMensa || 0;
+                }
+                const now = new Date();
+                document.getElementById('payslip_data').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function salvaBustaPaga() {
+            if (!currentPayslipFile) { alert("Nessun file caricato!"); return; }
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const payslip = {
+                    id: Date.now().toString(),
+                    uploadDate: new Date().toISOString().split('T')[0],
+                    fileName: currentPayslipFile.name,
+                    fileData: e.target.result,
+                    referenceMonth: document.getElementById('payslip_data').value,
+                    components: {
+                        pagaBase: parseFloat(document.getElementById('payslip_pagaBase').value),
+                        maggStraord: parseFloat(document.getElementById('payslip_maggStraord').value) / 100,
+                        indNotturna: parseFloat(document.getElementById('payslip_indNotturna').value),
+                        indTurno: parseFloat(document.getElementById('payslip_indTurno').value) || 0,
+                        ticketMensa: parseFloat(document.getElementById('payslip_ticketMensa').value) || 0,
+                        indFestiva: parseFloat(document.getElementById('payslip_indFestiva').value) || 0,
+                        scattiAnz: parseFloat(document.getElementById('payslip_scattiAnz').value) || 0
+                    },
+                    isActive: true
+                };
+                params.payslips.forEach(p => p.isActive = false);
+                params.payslips.push(payslip);
+                params.pagaBase = payslip.components.pagaBase;
+                params.maggStraord = payslip.components.maggStraord;
+                params.indNotturna = payslip.components.indNotturna;
+                params.indTurno = payslip.components.indTurno;
+                params.ticketMensa = payslip.components.ticketMensa;
+                params.indFestiva = payslip.components.indFestiva;
+                params.scattiAnz = payslip.components.scattiAnz;
+
+                // IMPORTANT: Save Updated Params
+                localStorage.setItem('paramsIBG', JSON.stringify(params));
+
+                currentPayslipFile = null;
+                document.getElementById('payslipFormContainer').style.display = 'none';
+                document.getElementById('payslipPreviewContainer').style.display = 'none';
+                document.getElementById('payslipInput').value = '';
+
+                // Update Settings UI to reflect new values
+                aggiornaCampiSettings();
+                renderPayslipHistory();
+                alert("✅ Busta paga salvata e parametri aggiornati!");
+            };
+            reader.readAsDataURL(currentPayslipFile);
+        }
+
+        function getActivePayslip() {
+            if (!params.payslips || params.payslips.length === 0) return null;
+            return params.payslips.find(p => p.isActive) || params.payslips[params.payslips.length - 1];
+        }
+
+        function setActivePayslip(id) {
+            params.payslips.forEach(p => p.isActive = (p.id === id));
+            const active = params.payslips.find(p => p.id === id);
+            if (active) {
+                params.pagaBase = active.components.pagaBase;
+                params.maggStraord = active.components.maggStraord;
+                params.indNotturna = active.components.indNotturna;
+                params.indTurno = active.components.indTurno || 0;
+                params.ticketMensa = active.components.ticketMensa || 0;
+                params.indFestiva = active.components.indFestiva || 0;
+                params.scattiAnz = active.components.scattiAnz || 0;
+                localStorage.setItem('paramsIBG', JSON.stringify(params));
+                aggiornaCampiSettings();
+                renderPayslipHistory();
+                alert("✅ Busta paga attivata!");
+            }
+        }
+
+        function deletePayslip(id) {
+            if (!confirm("Eliminare questa busta paga?")) return;
+            params.payslips = params.payslips.filter(p => p.id !== id);
+            localStorage.setItem('paramsIBG', JSON.stringify(params));
+            renderPayslipHistory();
+        }
+
+        function renderPayslipHistory() {
+            const container = document.getElementById('payslipHistory');
+            if (!params.payslips || params.payslips.length === 0) {
+                container.innerHTML = '<p style="color:#999; font-size:0.85em; text-align:center;">Nessuna busta paga caricata</p>';
+                return;
+            }
+            container.innerHTML = params.payslips.map(p => `
+                <div class="payslip-item ${p.isActive ? 'active' : ''}">
+                    <div>
+                        <strong>${p.referenceMonth || 'N/A'}</strong><br>
+                        <small style="color:#666;">${p.fileName}</small><br>
+                        <small style="color:#999;">Caricato: ${p.uploadDate}</small>
+                    </div>
+                    <div style="display:flex; gap:5px;">
+                        ${!p.isActive ? `<button onclick="setActivePayslip('${p.id}')" style="background:var(--accent); color:white; font-size:10px; padding:5px 10px; margin:0;">Attiva</button>` : '<span style="color:var(--success); font-size:10px; font-weight:bold;">✓ ATTIVA</span>'}
+                        <button onclick="deletePayslip('${p.id}')" style="background:var(--danger); color:white; font-size:10px; padding:5px 10px; margin:0;">🗑️</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // ========== GEMINI AI INTEGRATION ==========
+        async function analizzaConGemini() {
+            if (!params.geminiApiKey) {
+                alert("⚠️ Configura prima la API Key di Gemini nelle impostazioni (Tab Cloud & AI)!");
+                toggleSettings();
+                return;
+            }
+            if (!currentPayslipFile) return;
+
+            const btn = document.getElementById('geminiAction');
+            const loading = document.getElementById('geminiLoading');
+            btn.style.opacity = "0.5";
+            btn.style.pointerEvents = "none";
+            loading.style.display = "block";
+
+            try {
+                // 1. Convert file to Base64
+                const base64Data = await readFileAsBase64(currentPayslipFile);
+                const mimeType = currentPayslipFile.type;
+
+                // 2. Prepare payload
+                const promptText = `
+                    Analizza questa busta paga. È una tabella con colonne: CODICE, DESCRIZIONE, ORE/GIORNI, IMPORTO UNITARIO, COMPETENZE.
+                    
+                    Devi estrarre ESCLUSIVAMENTE i valori dalla colonna "IMPORTO UNITARIO" (la tariffa oraria/giornaliera), NON le ore e NON i totali.
+                    
+                    Estrai questi dati in JSON puro:
+                    - pagaBase: cerca "Retribuzione" o "Stipendio Base". PRENDI IMPORTO UNITARIO (es. circa 13.x). NON prendere le ore (es. 133, 173).
+                    - maggStraord: cerca la % di maggiorazione straordinario (es. 0.45 se 45%).
+                    - indNotturna: cerca "Maggioraz.notturno" o simile. PRENDI IMPORTO UNITARIO (es. circa 2.7). NON le ore (es. 46).
+                    - indTurno: cerca "Maggiorazione Turni". PRENDI IMPORTO UNITARIO (es. circa 0.8).
+                    - ticketMensa: cerca "Ticket Mensa". PRENDI IMPORTO UNITARIO (es. 3.00). NON il numero di ticket.
+                    - indFestiva: cerca "Festivita" o "Indennità Festiva". PRENDI IMPORTO UNITARIO.
+                    - scattiAnz: cerca "Scatti Anzianità" o "Scatti". Qui prendi il TOTALE MENSILE (Competenze), non l'unitario.
+                    
+                    Se un valore non è presente, metti null o 0.
+                    Usa il punto come separatore decimale (es. 13.46).
+                    Rispondi SOLO con il JSON.
+                `;
+
+                const modelName = params.geminiModel || "gemini-1.5-flash";
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${params.geminiApiKey}`;
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [
+                                { text: promptText },
+                                { inline_data: { mime_type: mimeType, data: base64Data } }
+                            ]
+                        }]
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    let errorMsg = response.status + " " + response.statusText;
+                    try {
+                        const errorJson = JSON.parse(errorText);
+                        if (errorJson.error && errorJson.error.message) {
+                            errorMsg = errorJson.error.message;
+                        }
+                    } catch (e) {
+                        // ignore json parse error, use text
+                        if (errorText) errorMsg += " - " + errorText;
+                    }
+                    throw new Error("Errore API Gemini: " + errorMsg);
+                }
+
+                const result = await response.json();
+                const textResponse = result.candidates[0].content.parts[0].text;
+
+                // Clean response (remove json markdown if present)
+                const jsonStr = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+                const data = JSON.parse(jsonStr);
+
+                // 3. Populate Form
+                if (data.pagaBase) document.getElementById('payslip_pagaBase').value = data.pagaBase;
+                if (data.maggStraord) document.getElementById('payslip_maggStraord').value = data.maggStraord * 100;
+                if (data.indNotturna) document.getElementById('payslip_indNotturna').value = data.indNotturna;
+                if (data.indTurno) document.getElementById('payslip_indTurno').value = data.indTurno;
+                if (data.ticketMensa) document.getElementById('payslip_ticketMensa').value = data.ticketMensa;
+                if (data.indFestiva) document.getElementById('payslip_indFestiva').value = data.indFestiva;
+                if (data.scattiAnz) document.getElementById('payslip_scattiAnz').value = data.scattiAnz;
+
+                alert("✅ Dati estratti con successo! Verifica i campi e salva.");
+
+            } catch (error) {
+                console.error(error);
+                alert("❌ Errore durante l'analisi: " + error.message);
+            } finally {
+                btn.style.opacity = "1";
+                btn.style.pointerEvents = "auto";
+                loading.style.display = "none";
+            }
+        }
+
+        function readFileAsBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64String = reader.result.split(',')[1]; // Remove "data:application/pdf;base64,"
+                    resolve(base64String);
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function checkGeminiModels() {
+            const apiKey = document.getElementById('geminiApiKey').value || params.geminiApiKey;
+            if (!apiKey) { alert("Inserisci prima la API Key."); return; }
+
+            const btn = document.querySelector('button[onclick="checkGeminiModels()"]');
+            const originalText = btn ? btn.innerText : "🔍";
+            if (btn) btn.innerText = "⏳...";
+
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+                if (!response.ok) throw new Error(response.statusText);
+                const data = await response.json();
+
+                const available = data.models
+                    .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent"))
+                    .map(m => m.name.replace("models/", ""))
+                    .filter(name => name.includes("gemini"));
+
+                const select = document.getElementById('geminiModelSelect');
+                if (select) {
+                    select.innerHTML = "";
+                    available.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model;
+                        option.text = model;
+                        select.appendChild(option);
+                    });
+                    // Maintain selection if possible or default
+                    if (params.geminiModel && available.includes(params.geminiModel)) {
+                        select.value = params.geminiModel;
+                    } else if (available.length > 0) {
+                        select.value = available[0];
+                    }
+                }
+
+                if (available.length > 0) {
+                    alert("✅ Lista modelli aggiornata! Selezionane uno dal menu a tendina.");
+                } else {
+                    alert("⚠️ Nessun modello trovato.");
+                }
+            } catch (e) {
+                alert("Errore ricerca modelli: " + e.message);
+            } finally {
+                if (btn) btn.innerText = originalText;
+            }
+        }
+
+        // ========== FIREBASE ==========
+        function caricaDaFirebase() {
+            db.collection("turni").orderBy("data", "desc").onSnapshot((snapshot) => {
+                storico = [];
+                snapshot.forEach(doc => storico.push({ id: doc.id, ...doc.data() }));
+                renderStorico();
+            });
+        }
+
+        // ========== CALCOLO TURNI ==========
+        function eseguiCalcolo() {
+            const tipoTurno = document.getElementById('tipoTurno').value;
+            const dataStr = document.getElementById('dataTurno').value;
+            const dateObj = new Date(dataStr);
+            const isWeekend = (dateObj.getDay() === 0 || dateObj.getDay() === 6); // 0=Sun, 6=Sat
+
+            const hInizioStr = document.getElementById('inizio').value;
+            const hFineStr = document.getElementById('fine').value;
+            const inputStraord = parseFloat(document.getElementById('oreStraordinario').value) || 0;
+            const inputFerie = parseFloat(document.getElementById('oreFerie').value) || 0;
+
+            // Calcolo Ore Lavorate
+            let hInizio = parseInt(hInizioStr.split(':')[0]);
+            let mInizio = parseInt(hInizioStr.split(':')[1]);
+            let hFine = parseInt(hFineStr.split(':')[0]);
+            let mFine = parseInt(hFineStr.split(':')[1]);
+
+            // Semplificazione: calcolo in millisecondi per precisione, poi torno a ore decimali
+            let d1 = new Date(`2000-01-01T${hInizioStr}:00`);
+            let d2 = new Date(`2000-01-01T${hFineStr}:00`);
+            if (d2 <= d1) d2.setDate(d2.getDate() + 1); // Passaggio mezzanotte
+            let diffOre = (d2 - d1) / 1000 / 60 / 60;
+
+            // SPECIAL LOGIC: Malattia = 8h paid as regular work, but technically "hours worked" in timestamp are 0.
+            // We use inputFerie for calculation basis if set, but logic below handles it.
+            if (tipoTurno === 'ferie' || tipoTurno === 'permesso') {
+                diffOre = 0;
+            } else if (tipoTurno === 'malattia') {
+                diffOre = 0;
+                // Note: 'inputFerie' will be 8 from setup. We will use that to pay.
+            }
+
+            // Analisi Notturne (22-06)
+            let oreNotturne = 0;
+            // Logica semplice per notturno: iterare le ore o calcolo intersezione
+            // Assumo step orari per semplicità come prima, ma più robusto:
+            // Per ogni ora lavorata, se cade in fascia 22-06 => +1
+            // (Migliorabile con calcolo esatto minuti, ma stima oraria va bene per ora da richiesta user)
+            // User request logic: "Se inizia tra 22 e 06 calcola tutto notturno" (vecchia regola), 
+            // MA con i nuovi turni ("Pomeriggio 14-22") non deve scattare.
+            // Regola standard: ore EFFETTIVE tra 22 e 06.
+            // Regola user precedente: "Se il turno inizia tra le 22 e le 06, l'app calcola il notturno su tutto il turno"
+            // Manteniamo regola user se tipoTurno == 'notte' o orario start in fascia?
+            // "Notte" (22-06) -> 8h notturne.
+
+            // Logica ibrida: Calcolo puntuale
+            let current = new Date(d1);
+            while (current < d2) {
+                let h = current.getHours();
+                if (h >= 22 || h < 6) oreNotturne += 1; // 1 ora o frazione? Assumiamo blocchi orari interi per ora
+                current.setHours(current.getHours() + 1);
+            }
+            if (oreNotturne > diffOre) oreNotturne = diffOre; // Clamp
+
+            // Recupero Parametri
+            const activePay = getActivePayslip();
+            const usedParams = activePay ? activePay.components : params;
+
+            // Calcoli Importi
+            let pagaOraria = usedParams.pagaBase;
+            let importoOrdinario = 0;
+            let importoStraordinario = 0;
+            let importoNotturno = 0;
+            let importoFerie = 0;
+            let importoIndTurno = 0;
+
+            // 1. Ordinario vs Weekend
+            // Se weekend, tutto il lavorato è straordinario? O base maggiorata?
+            // User request: "considera il sabato e la domenica sempre straordinario"
+
+            let oreOridinarieCalcolate = diffOre;
+            let oreStraordinarieCalcolate = inputStraord;
+
+            if (isWeekend) {
+                // Tutto Straordinario (su ore lavorate effettive)
+                oreStraordinarieCalcolate += diffOre;
+                oreOridinarieCalcolate = 0;
+            }
+
+            // Calcolo
+            importoOrdinario = oreOridinarieCalcolate * pagaOraria;
+
+            // Straordinario
+            let tassoStraord = pagaOraria * (1 + usedParams.maggStraord);
+            importoStraordinario = oreStraordinarieCalcolate * tassoStraord;
+
+            // Notturno (indennità aggiuntiva)
+            importoNotturno = oreNotturne * usedParams.indNotturna;
+
+            // RULE: "se e presente lo straordinario non e presente il notturno"
+            if (importoStraordinario > 0) {
+                importoNotturno = 0;
+            }
+
+            // Indennità Turno (su ore lavorate totali?)
+            let applyTurno = false;
+            if (tipoTurno === 'mattina' && params.indemnities.mattina) applyTurno = true;
+            if (tipoTurno === 'pomeriggio' && params.indemnities.pomeriggio) applyTurno = true;
+            if (tipoTurno === 'notte' && params.indemnities.notte) applyTurno = true;
+
+            if (applyTurno) {
+                importoIndTurno = diffOre * (usedParams.indTurno || 0);
+            } else {
+                importoIndTurno = 0;
+            }
+
+            // Ferie/Permessi
+            // Logic update: Malattia pays as 8h * Base. 
+            // We typically use 'importoFerie' for this category (Absence paid). 
+            // If user insisted "calcola come giornata lavorativa" they might mean 'Ordinary'.
+            // But usually Malattia is separate. 
+            // Let's ensure if Malattia, we calculate 8h * Base. 
+            // Since ferieDiv.value = 8, inputFerie = 8.
+            importoFerie = inputFerie * pagaOraria;
+
+            // If Malattia, we might want to ensure it doesn't count as 'Ordinary' double dip.
+            // Since diffOre=0 for Malattia, importoOrdinario=0. So it's fine. It pays via importoFerie.
+
+            // Ticket Mensa (1 al giorno se lavorato > 4h? Assumiamo se diffOre >= 4)
+            let importoTicket = (diffOre >= 4) ? (usedParams.ticketMensa || 0) : 0;
+
+            // Scatti removed from calculation as requested.
+            let importoScatti = 0;
+
+            let totaleGiorno = importoOrdinario + importoStraordinario + importoNotturno + importoIndTurno + importoFerie + importoTicket + importoScatti;
+
+            // Dati output
+            const editIdElem = document.getElementById('editId');
+            const finalId = (editIdElem && editIdElem.value) ? editIdElem.value : Date.now().toString();
+
+            ultimoCalcolo = {
+                id: finalId,
+                data: dataStr,
+                tipo: tipoTurno,
+                orario: `${hInizioStr} - ${hFineStr}`,
+                oreLavorate: diffOre,
+                oreStraord: oreStraordinarieCalcolate,
+                oreFerie: inputFerie,
+                oreNotturne: oreNotturne,
+                dettagli: {
+                    ord: importoOrdinario,
+                    stra: importoStraordinario,
+                    nott: importoNotturno,
+                    turn: importoIndTurno,
+                    ferie: importoFerie,
+                    ticket: importoTicket,
+                    scatti: importoScatti
+                },
+                totale: totaleGiorno,
+                isWeekend: isWeekend
+            };
+
+            const res = document.getElementById('result');
+            res.style.display = 'block';
+            res.innerHTML = `
+                <strong>Totale Giornaliero:</strong><br>
+                <span style="font-size:1.4em; color:var(--success)">€ ${totaleGiorno.toFixed(2)}</span><br>
+                <table style="width:100%; font-size:0.85em; margin-top:10px; color:#555;">
+                    <tr><td>Ordinario:</td><td style="text-align:right">€ ${importoOrdinario.toFixed(2)}</td></tr>
+                    ${importoStraordinario > 0 ? `<tr><td>Straordinario:</td><td style="text-align:right">€ ${importoStraordinario.toFixed(2)}</td></tr>` : ''}
+                    ${importoNotturno > 0 ? `<tr><td>Ind. Notturna:</td><td style="text-align:right">€ ${importoNotturno.toFixed(2)}</td></tr>` : ''}
+                    ${importoIndTurno > 0 ? `<tr><td>Ind. Turno:</td><td style="text-align:right">€ ${importoIndTurno.toFixed(2)}</td></tr>` : ''}
+                    ${importoFerie > 0 ? `<tr><td>Ferie/Permessi:</td><td style="text-align:right">€ ${importoFerie.toFixed(2)}</td></tr>` : ''}
+                    <tr><td>Ticket:</td><td style="text-align:right">€ ${importoTicket.toFixed(2)}</td></tr>
+                    <tr><td>Scatti (rateo):</td><td style="text-align:right">€ ${importoScatti.toFixed(2)}</td></tr>
+                </table>
+            `;
+            // document.getElementById('btnSave').style.display = 'block';
+            document.getElementById('btnPdf').style.display = 'block';
+        }
+
+        let currentStatFilter = null;
+
+        function filterByStat(stat) {
+            if (currentStatFilter === stat) currentStatFilter = null;
+            else currentStatFilter = stat;
+            renderStorico();
+        }
+
+        function renderStorico() {
+            const lista = document.getElementById('listaStorico');
+            const totDiv = document.getElementById('totaleMensile');
+            const filtro = document.getElementById('filtroMese').value;
+
+            lista.innerHTML = '';
+            let somma = 0;
+
+            // Stats Accumulators
+            let totOrd = 0, totStra = 0, totNott = 0, totFerie = 0;
+
+            // Sort
+            storico.sort((a, b) => new Date(b.data) - new Date(a.data));
+
+            // Basic Filter by Month
+            let monthItems = storico.filter(item => item.data.startsWith(filtro));
+
+            // Stats Calc
+            // Stats Calc
+            monthItems.forEach(item => {
+                let hLavorate = parseFloat(item.oreLavorate);
+                if (isNaN(hLavorate)) hLavorate = 0;
+
+                let hStra = parseFloat(item.oreStraord);
+                if (isNaN(hStra)) hStra = 0;
+
+                let hNott = parseFloat(item.oreNotturne);
+                if (isNaN(hNott)) hNott = 0;
+
+                let hFerie = parseFloat(item.oreFerie);
+                if (isNaN(hFerie)) hFerie = 0;
+
+                let hOrd = Math.max(0, hLavorate - hStra);
+
+                // Debug log
+                // console.log(`Item ${item.data}: Lav=${hLavorate}, Stra=${hStra}, Nott=${hNott}, Ferie=${hFerie}, Ord=${hOrd}`);
+
+                totOrd += hOrd;
+                totStra += hStra;
+                totNott += hNott;
+                totFerie += hFerie;
+            });
+
+            // --- RE-RENDER DASHBOARD DYNAMICALLY ---
+            // This ensures we always update the visible elements and avoid ID collisions
+            const dashboard = document.getElementById('statsDashboard');
+            if (dashboard) {
+                // Determine active styles
+                const activeStyle = "box-shadow: inset 0 0 0 2px #555; opacity: 1;";
+                // Default styling for inactive buttons
+                // If a filter is active, inactive buttons fade to 0.5. If no filter, all are 1.
+                const getStyle = (type) => {
+                    if (currentStatFilter === type) return activeStyle;
+                    if (currentStatFilter) return "opacity: 0.5;";
+                    return "opacity: 1;";
+                };
+
+                dashboard.innerHTML = `
+                    <button onclick="filterByStat('ord')" style="background:#eaf2f8; border:1px solid #d6eaf8; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('ord')}">
+                        <div style="font-size:0.75em; color:#555;">ORDINARIE</div>
+                        <div style="font-weight:bold; color:#2980b9;">${totOrd.toFixed(1)}h</div>
+                    </button>
+                    <button onclick="filterByStat('stra')" style="background:#fef5e7; border:1px solid #fae5d3; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('stra')}">
+                        <div style="font-size:0.75em; color:#555;">STRAORD.</div>
+                        <div style="font-weight:bold; color:#e67e22;">${totStra.toFixed(1)}h</div>
+                    </button>
+                    <button onclick="filterByStat('nott')" style="background:#f4ecf7; border:1px solid #ebdef0; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('nott')}">
+                        <div style="font-size:0.75em; color:#555;">NOTTURNE</div>
+                        <div style="font-weight:bold; color:#8e44ad;">${totNott.toFixed(1)}h</div>
+                    </button>
+                    <button onclick="filterByStat('ferie')" style="background:#e8f8f5; border:1px solid #d1f2eb; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('ferie')}">
+                        <div style="font-size:0.75em; color:#555;">FERIE/PERM</div>
+                        <div style="font-weight:bold; color:#27ae60;">${totFerie.toFixed(1)}h</div>
+                    </button>
+                `;
+            }
+
+            // Filter by Active Stat
+            let visibleItems = monthItems;
+            if (currentStatFilter) {
+                visibleItems = visibleItems.filter(item => {
+                    let hLavorate = parseFloat(item.oreLavorate) || 0;
+                    let hStra = parseFloat(item.oreStraord) || 0;
+                    let hNott = parseFloat(item.oreNotturne) || 0;
+                    let hFerie = parseFloat(item.oreFerie) || 0;
+                    let hOrd = Math.max(0, hLavorate - hStra);
+
+                    if (currentStatFilter === 'ord') return hOrd > 0;
+                    if (currentStatFilter === 'stra') return hStra > 0;
+                    if (currentStatFilter === 'nott') return hNott > 0;
+                    if (currentStatFilter === 'ferie') return hFerie > 0;
+                    return true;
+                });
+            }
+
+            if (visibleItems.length === 0) {
+                lista.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">Nessun turno trovato.</div>';
+                totDiv.innerText = '€ 0.00';
+            }
+
+            visibleItems.forEach(item => {
+                somma += item.totale;
+
+                // Build Cost Details HTML
+                let detailsHtml = '<div style="margin-top:8px; font-size:0.85em; color:#555; display:grid; grid-template-columns: 1fr 1fr; gap:5px;">';
+                if (item.dettagli.ord > 0) detailsHtml += `<div>Ord: €${item.dettagli.ord.toFixed(2)}</div>`;
+                if (item.dettagli.stra > 0) detailsHtml += `<div>Stra: €${item.dettagli.stra.toFixed(2)}</div>`;
+                if (item.dettagli.nott > 0) detailsHtml += `<div>Nott: €${item.dettagli.nott.toFixed(2)}</div>`;
+                if (item.dettagli.turn > 0) detailsHtml += `<div>Turno: €${item.dettagli.turn.toFixed(2)}</div>`;
+                if (item.dettagli.ticket > 0) detailsHtml += `<div>Ticket: €${item.dettagli.ticket.toFixed(2)}</div>`;
+                if (item.dettagli.ferie > 0) detailsHtml += `<div>Ferie: €${item.dettagli.ferie.toFixed(2)}</div>`;
+                if (item.dettagli.scatti > 0) detailsHtml += `<div>Scatti: €${item.dettagli.scatti.toFixed(2)}</div>`;
+                detailsHtml += '</div>';
+
+                lista.innerHTML += `
+            <div class="history-item" style="flex-direction:column; align-items:flex-start; background:white; padding:15px; border-radius:10px; margin-bottom:15px; box-shadow:0 3px 10px rgba(0,0,0,0.08); border-left: 5px solid ${item.isWeekend ? '#e74c3c' : '#3498db'};">
+                <div style="display:flex; justify-content:space-between; width:100%; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; align-items:center;">
+                    <div>
+                        <span style="font-weight:bold; font-size:1.1em; color:#2c3e50">${new Date(item.data).toLocaleDateString('it-IT')}</span>
+                        <span style="font-size:0.8em; background:#f0f2f5; padding:2px 6px; border-radius:4px; margin-left:5px;">${item.tipo.toUpperCase()}</span>
+                    </div>
+                    <span style="font-weight:bold; font-size:1.2em; color:var(--success)">€ ${item.totale.toFixed(2)}</span>
+                </div>
+                
+                <div style="width:100%;">
+                    <div style="display:flex; justify-content:space-between; font-size:0.9em; color:#666;">
+                        <span>🕒 ${item.orario} (${item.oreLavorate}h)</span>
+                        <span>${item.isWeekend ? '🌙 Weekend' : '🏢 Feriale'}</span>
+                    </div>
+                    
+                    ${detailsHtml}
+                    
+                    <div style="margin-top:12px; text-align:right; border-top:1px solid #f0f0f0; padding-top:8px; display:flex; gap:10px; justify-content:flex-end;">
+                        <button onclick="cancellaTurno('${item.id}')" style="background:#e74c3c; color:white; border:none; padding:6px 15px; border-radius:5px; cursor:pointer; font-size:0.9em; display:flex; align-items:center; gap:5px;">
+                            🗑️ Cancella
+                        </button>
+                        <button onclick="modificaTurno('${item.id}')" style="background:var(--accent); color:white; border:none; padding:6px 15px; border-radius:5px; cursor:pointer; font-size:0.9em; display:flex; align-items:center; gap:5px;">
+                            ✏️ Modifica
+                        </button>
+                    </div>
+                </div>
+            </div>`;
+            });
+            totDiv.innerText = `€ ${somma.toFixed(2)}`;
+        }
+
+        function salvaTurno() {
+            try {
+                // Esegue il calcolo prima di salvare
+                eseguiCalcolo();
+
+                let editId = document.getElementById('editId').value;
+                const dateToCheck = ultimoCalcolo.data;
+
+                // Check for duplicate date if creating new entry
+                if (!editId) {
+                    const existing = storico.find(item => item.data === dateToCheck);
+                    if (existing) {
+                        if (confirm(`⚠️ Esiste già un turno per la data ${dateToCheck}.\nVuoi sovrascriverlo?`)) {
+                            editId = existing.id;
+                            ultimoCalcolo.id = editId; // Use existing ID to overwrite
+                        } else {
+                            return; // Cancel save
+                        }
+                    }
+                }
+
+                if (db) {
+                    if (editId) {
+                        db.collection("turni").doc(editId).set(ultimoCalcolo).then(() => {
+                            alert("Turno aggiornato!");
+                            resetForm();
+                        }).catch(err => alert("Errore DB: " + err));
+                    } else {
+                        db.collection("turni").add(ultimoCalcolo).then(() => {
+                            alert("Turno salvato!");
+                            resetForm();
+                        }).catch(err => alert("Errore DB: " + err));
+                    }
+                } else {
+                    if (editId) {
+                        const idx = storico.findIndex(x => x.id === editId);
+                        if (idx >= 0) storico[idx] = ultimoCalcolo;
+                    } else {
+                        storico.push({ ...ultimoCalcolo });
+                    }
+                    localStorage.setItem('storicoIBG', JSON.stringify(storico));
+                    renderStorico();
+                    alert(editId ? "Turno aggiornato!" : "Turno salvato!");
+                    resetForm();
+                }
+                document.getElementById('editId').value = "";
+            } catch (e) {
+                alert("Errore Salvataggio: " + e.message);
+                console.error(e);
+            }
+        }
+
+        function resetForm() {
+            document.getElementById('result').style.display = 'none';
+            // document.getElementById('btnSave').style.display = 'block'; // Always visible now
+            document.getElementById('btnPdf').style.display = 'none';
+            document.getElementById('editId').value = "";
+            // Reset fields
+            document.getElementById('oreStraordinario').value = 0;
+            document.getElementById('oreFerie').value = 0;
+            document.getElementById('tipoTurno').value = 'mattina';
+            impostaOrariTurno(); // Reset times
+        }
+
+
+
+        function cancellaTurno(id) {
+            if (!confirm("Sei sicuro di voler eliminare questo turno?")) return;
+
+            if (db) {
+                db.collection("turni").doc(id).delete().then(() => {
+                    alert("Turno eliminato!");
+                    // Listener will update UI
+                }).catch(e => alert("Errore cancellazione: " + e));
+            } else {
+                storico = storico.filter(x => x.id !== id);
+                localStorage.setItem('storicoIBG', JSON.stringify(storico));
+                renderStorico();
+            }
+        }
+
+        function modificaTurno(id) {
+            const item = storico.find(i => i.id === id);
+            if (!item) return;
+
+            // Fill Form
+            document.getElementById('editId').value = item.id;
+            document.getElementById('dataTurno').value = item.data;
+            document.getElementById('tipoTurno').value = item.tipo;
+
+            const orari = item.orario.split(' - ');
+            if (orari.length === 2) {
+                document.getElementById('inizio').value = orari[0].trim();
+                document.getElementById('fine').value = orari[1].trim();
+            }
+
+            document.getElementById('oreStraordinario').value = item.oreStraord || 0;
+            document.getElementById('oreFerie').value = item.oreFerie || 0;
+
+            // Trigger Calc to show preview
+            eseguiCalcolo();
+
+            // Scroll to top
+            document.querySelector('.container').scrollIntoView();
+        }
+
+        function generaReportPDF() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            const monthVal = document.getElementById('filtroMese').value;
+            const visibleItems = storico
+                .filter(item => item.data.startsWith(monthVal))
+                .sort((a, b) => new Date(a.data) - new Date(b.data)); // Asc for report
+
+            if (visibleItems.length === 0) { alert("Nessun turno nel mese selezionato."); return; }
+
+            doc.setFontSize(18); doc.text(`REPORT TURNI - ${monthVal}`, 14, 20);
+            doc.setFontSize(10);
+
+            let y = 30;
+            let totalMonth = 0;
+            let totalHours = 0;
+
+            // Header
+            doc.setFont(undefined, 'bold');
+            doc.text("Data", 14, y);
+            doc.text("Turno", 40, y);
+            doc.text("Ore", 80, y);
+            doc.text("Importo", 110, y);
+            doc.text("Dettagli", 140, y);
+            doc.line(14, y + 2, 195, y + 2);
+            y += 10;
+            doc.setFont(undefined, 'normal');
+
+            visibleItems.forEach(item => {
+                totalMonth += item.totale;
+                totalHours += parseFloat(item.oreLavorate);
+
+                // Page break check
+                if (y > 270) { doc.addPage(); y = 20; }
+
+                doc.text(item.data.split('-').reverse().join('/'), 14, y);
+                doc.text(item.tipo.substring(0, 10), 40, y);
+                doc.text(`${item.oreLavorate}h`, 80, y);
+                doc.text(`€ ${item.totale.toFixed(2)}`, 110, y);
+
+                // Short breakdown
+                let details = [];
+                if (item.dettagli.stra > 0) details.push(`Str:€${item.dettagli.stra.toFixed(0)}`);
+                if (item.dettagli.nott > 0) details.push(`Not:€${item.dettagli.nott.toFixed(0)}`);
+                if (item.dettagli.ferie > 0) details.push(`Fer:€${item.dettagli.ferie.toFixed(0)}`);
+                doc.text(details.join(', '), 140, y);
+
+                y += 7;
+            });
+
+            // Summary
+            doc.line(14, y, 195, y);
+            y += 10;
+            doc.setFont(undefined, 'bold');
+            doc.text(`TOTALE: € ${totalMonth.toFixed(2)}`, 14, y);
+
+            // Stats for report calc
+            let rTotOrd = 0, rTotStra = 0, rTotNott = 0, rTotFerie = 0;
+            visibleItems.forEach(item => {
+                let hLavorate = parseFloat(item.oreLavorate) || 0;
+                let hStra = parseFloat(item.oreStraord) || 0;
+                let hNott = parseFloat(item.oreNotturne) || 0;
+                let hFerie = parseFloat(item.oreFerie) || 0;
+                let hOrd = Math.max(0, hLavorate - hStra);
+                rTotOrd += hOrd; rTotStra += hStra; rTotNott += hNott; rTotFerie += hFerie;
+            });
+
+            // Hours Breakdown Table
+            y += 15;
+            doc.setFontSize(11);
+            doc.text("Riepilogo Ore Mese:", 14, y);
+            y += 8;
+            doc.setFontSize(10); doc.setFont(undefined, 'normal');
+
+            doc.text(`Ordinarie:  ${rTotOrd.toFixed(1)} h`, 14, y);
+            doc.text(`Straordinarie:  ${rTotStra.toFixed(1)} h`, 70, y);
+            y += 6;
+            doc.text(`Notturne:   ${rTotNott.toFixed(1)} h`, 14, y);
+            doc.text(`Ferie/Perm/Mal: ${rTotFerie.toFixed(1)} h`, 70, y);
+
+            doc.save(`Report_Turni_${monthVal}.pdf`);
+        }
+
+
+        function generaPDF() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            doc.setFontSize(18); doc.text("REPORT TURNO IBG", 20, 20);
+            doc.setFontSize(12);
+            doc.text(`Data: ${ultimoCalcolo.data}`, 20, 35);
+            doc.text(`Prestazione: ${ultimoCalcolo.tipo}`, 20, 45);
+            doc.text(`Ore Totali: ${ultimoCalcolo.oreTotali}h`, 20, 55);
+            doc.text(`Indennità Notturna (N08118): ${ultimoCalcolo.oreNotturne}h - EUR ${ultimoCalcolo.lordoNotturno.toFixed(2)}`, 20, 65);
+            doc.text(`Indennità Turno: EUR ${ultimoCalcolo.indTurnoTot.toFixed(2)}`, 20, 75);
+            doc.text(`Ticket Mensa: EUR ${ultimoCalcolo.ticket.toFixed(2)}`, 20, 85);
+            if (ultimoCalcolo.scattiGnaliero > 0) {
+                doc.text(`Scatti Anzianità (quota gg): EUR ${ultimoCalcolo.scattiGnaliero.toFixed(2)}`, 20, 95);
+            }
+            doc.text(`--------------------------------------------------`, 20, 105);
+            doc.text(`LORDO TOTALE: EUR ${ultimoCalcolo.totale.toFixed(2)}`, 20, 115);
+            doc.save(`IBG_${ultimoCalcolo.data}.pdf`);
+        }
+
+        // ========== IMPOSTAZIONI ==========
+        function toggleSettings() {
+            const modal = document.getElementById('modalSettings');
+            modal.style.display = (modal.style.display === 'block') ? 'none' : 'block';
+            if (modal.style.display === 'block') {
+                aggiornaCampiSettings();
+                renderPayslipHistory();
+            }
+        }
+
+        function aggiornaCampiSettings() {
+            document.getElementById('pagaBase').value = params.pagaBase;
+            document.getElementById('maggStraord').value = params.maggStraord * 100;
+            document.getElementById('indNotturna').value = params.indNotturna;
+            document.getElementById('indTurno').value = params.indTurno;
+            document.getElementById('ticketMensa').value = params.ticketMensa;
+            document.getElementById('indFestiva').value = params.indFestiva;
+            document.getElementById('scattiAnz').value = params.scattiAnz;
+            document.getElementById('fbConfig').value = params.fbConfig;
+            document.getElementById('geminiApiKey').value = params.geminiApiKey || "";
+
+            // New Settings
+            const sel = document.getElementById('geminiModelSelect');
+            if (sel) sel.value = params.geminiModel || "gemini-1.5-flash";
+
+            const shiftSel = document.getElementById('shiftStart');
+            if (shiftSel) shiftSel.value = params.shiftStart || "06:00";
+
+            if (params.indemnities) {
+                document.getElementById('checkIndMattina').checked = params.indemnities.mattina;
+                document.getElementById('checkIndPomeriggio').checked = params.indemnities.pomeriggio;
+                document.getElementById('checkIndNotte').checked = params.indemnities.notte;
+            }
+        }
+
+        function salvaImpostazioni() {
+            params.pagaBase = parseFloat(document.getElementById('pagaBase').value);
+            params.maggStraord = parseFloat(document.getElementById('maggStraord').value) / 100;
+            params.indNotturna = parseFloat(document.getElementById('indNotturna').value);
+            params.indTurno = parseFloat(document.getElementById('indTurno').value);
+            params.ticketMensa = parseFloat(document.getElementById('ticketMensa').value);
+            params.indFestiva = parseFloat(document.getElementById('indFestiva').value);
+            params.scattiAnz = parseFloat(document.getElementById('scattiAnz').value);
+            params.fbConfig = document.getElementById('fbConfig').value;
+            params.geminiApiKey = document.getElementById('geminiApiKey').value;
+            params.geminiModel = document.getElementById('geminiModelSelect').value;
+
+            // Save New Settings
+            params.shiftStart = document.getElementById('shiftStart').value;
+            params.indemnities = {
+                mattina: document.getElementById('checkIndMattina').checked,
+                pomeriggio: document.getElementById('checkIndPomeriggio').checked,
+                notte: document.getElementById('checkIndNotte').checked
+            };
+
+            localStorage.setItem('paramsIBG', JSON.stringify(params));
+            location.reload();
+        }     // ========== BACKUP ==========
+        function esportaBackup() {
+            const blob = new Blob([JSON.stringify({ params, storico }, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `backup_turni_${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        }
+
+        function importaBackup(e) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const data = JSON.parse(event.target.result);
+                localStorage.setItem('paramsIBG', JSON.stringify(data.params));
+                localStorage.setItem('storicoIBG', JSON.stringify(data.storico));
+                location.reload();
+            };
+            reader.readAsText(e.target.files[0]);
+        }
+
+        function cancellaStorico() {
+            if (confirm("Cancellare tutto lo storico?")) {
+                if (db) {
+                    alert("Per il Cloud, cancella i dati direttamente dalla console Firebase.");
+                } else {
+                    storico = [];
+                    localStorage.removeItem('storicoIBG');
+                    renderStorico();
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>
