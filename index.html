@@ -352,6 +352,7 @@
                 <button class="tab-btn" onclick="switchTab('bustapaga')">💰 Busta Paga</button>
                 <button class="tab-btn" onclick="switchTab('backup')">💾 Backup</button>
                 <button class="tab-btn" onclick="switchTab('firebase')">☁️ Cloud & AI</button>
+                <button class="tab-btn" onclick="switchTab('verifica')">🔍 Verifica</button>
             </div>
 
             <!-- TAB PARAMETRI -->
@@ -539,9 +540,9 @@
                     <div style="display:flex; gap:5px;">
                         <input type="text" id="geminiModel" placeholder="gemini-1.5-flash" style="display:none;">
                         <select id="geminiModelSelect" style="flex:1;">
-                            <option value="gemini-1.5-flash" selected>gemini-1.5-flash</option>
+                            <option value="gemini-2.0-flash" selected>gemini-2.0-flash</option>
+                            <option value="gemini-1.5-flash">gemini-1.5-flash</option>
                             <option value="gemini-1.5-pro">gemini-1.5-pro</option>
-                            <option value="gemini-1.0-pro">gemini-1.0-pro</option>
                         </select>
                         <button onclick="checkGeminiModels()"
                             style="background:#667eea; color:white; width:auto; padding:0 15px; margin:0; font-size:12px;">🔍
@@ -568,6 +569,44 @@
                 </div>
             </div>
 
+            <!-- TAB VERIFICA -->
+            <div id="tab-verifica" class="tab-content">
+                <h4 style="margin-top:0">Confronto Busta Paga vs App</h4>
+                <p style="font-size:0.9em; color:#666;">Seleziona un mese e carica la busta paga corrispondente per
+                    verificare se i calcoli dell'app coincidono.</p>
+
+                <div class="input-group" style="margin-bottom: 20px;">
+                    <label>Seleziona Mese da Verificare</label>
+                    <input type="month" id="verify_month">
+                </div>
+
+                <div
+                    style="border: 2px dashed #ddd; border-radius: 8px; padding: 20px; text-align: center; margin: 15px 0; background: #fafafa;">
+                    <button onclick="document.getElementById('verifyInput').click()"
+                        style="background:var(--accent); color:white; font-size:14px; margin:0; width:auto; padding:10px 20px; border-radius:8px;">
+                        📄 Seleziona Busta Paga
+                    </button>
+                    <input type="file" id="verifyInput" accept="image/*,.pdf" style="display:none"
+                        onchange="handleVerifyFile(event)">
+                    <p id="verifyFileName" style="font-size:0.8em; color:#999; margin-top:10px; font-style: italic;">
+                        Nessun file selezionato</p>
+                </div>
+
+                <div style="text-align:center;">
+                    <button id="btnStartVerify" onclick="confrontaBustaPaga()"
+                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:white; font-weight:bold; border:none; display:none; margin:10px auto; padding:12px 25px; border-radius:10px; cursor:pointer; width:auto;">
+                        🔍 Avvia Confronto con Gemini
+                    </button>
+                </div>
+
+                <div id="verifyLoading" style="display:none; text-align:center; padding:20px; color:#667eea;">
+                    <span style="display:inline-block; animation: spin 1s linear infinite;">⏳</span> Confronto in
+                    corso... attendere...
+                </div>
+
+                <div id="verificationResult" style="margin-top:20px;"></div>
+            </div>
+
             <div style="padding: 20px; border-top: 2px solid #eee; background:#f8f9fa;">
                 <button onclick="salvaImpostazioni()" style="background:var(--primary); color:white; margin:0;">
                     💾 Salva e Riavvia
@@ -584,18 +623,19 @@
         let db = null;
         let params = {
             pagaBase: 13.46942,
-            maggStraord: 1.45,
+            maggStraord: 0.45,
             indNotturna: 2.71236,
             indTurno: 0.83954,
             ticketMensa: 3.00,
             indFestiva: 12.97572,
             scattiAnz: 145.30,
             fbConfig: "",
-            geminiApiKey: "",
-            geminiModel: "gemini-1.5-flash",
+            geminiApiKey: "AIzaSyAI0Sz3d51AWXNkadAawwZihqslC46R5uE",
+            geminiModel: "gemini-2.0-flash",
             payslips: [],
             shiftStart: "06:00",
-            indemnities: { mattina: true, pomeriggio: true, notte: true }
+            indemnities: { mattina: true, pomeriggio: true, notte: true },
+            lastAutoBackup: 0
         };
         let storico = [];
         let ultimoCalcolo = {};
@@ -610,6 +650,12 @@
                 if (!params.payslips) params.payslips = [];
                 if (!params.indemnities) params.indemnities = { mattina: true, pomeriggio: true, notte: true };
                 if (!params.shiftStart) params.shiftStart = "06:00";
+                if (!params.geminiApiKey) params.geminiApiKey = "AIzaSyAI0Sz3d51AWXNkadAawwZihqslC46R5uE";
+                // Ensure default 45% if it was the old 1.45 or missing
+                if (params.maggStraord === 1.45 || params.maggStraord === undefined) params.maggStraord = 0.45;
+                // Update to gemini-2.0-flash if using old default
+                if (params.geminiModel === "gemini-1.5-flash" || !params.geminiModel) params.geminiModel = "gemini-2.0-flash";
+                if (params.lastAutoBackup === undefined) params.lastAutoBackup = 0;
             }
 
             aggiornaCampiSettings();
@@ -651,7 +697,22 @@
             renderPayslipHistory();
             renderStorico(); // Ensure stats are calculated on load
             document.getElementById('dataTurno').valueAsDate = new Date();
+
+            // Check for automatic backup (after 1s to not block UI)
+            setTimeout(checkAutomaticBackup, 1000);
         };
+
+        function checkAutomaticBackup() {
+            const now = Date.now();
+            const oneWeek = 7 * 24 * 60 * 60 * 1000;
+
+            if (!params.lastAutoBackup || (now - params.lastAutoBackup) > oneWeek) {
+                console.log("Auto-backup triggered");
+                esportaBackup();
+                params.lastAutoBackup = now;
+                localStorage.setItem('paramsIBG', JSON.stringify(params));
+            }
+        }
 
         // ========== GESTIONE GUI ==========
         function updateShiftLabels() {
@@ -1081,9 +1142,23 @@
 
             // Logica ibrida: Calcolo puntuale
             let current = new Date(d1);
+            // Overtime hours are usually the last ones in the shift (or all if weekend)
+            let endOrdinary = new Date(d2.getTime() - (inputStraord * 3600000));
+
             while (current < d2) {
                 let h = current.getHours();
-                if (h >= 22 || h < 6) oreNotturne += 1; // 1 ora o frazione? Assumiamo blocchi orari interi per ora
+                // Standard: 22-06. Posticipato: 22-08.
+                let isNight = (h >= 22 || h < 6);
+                if (params.shiftStart === "08:00" && (h === 6 || h === 7)) {
+                    isNight = true;
+                }
+
+                // An hour is overtime if it's weekend OR it falls in the overtime window
+                let isOvertime = isWeekend || (current >= endOrdinary);
+
+                if (isNight && !isOvertime) {
+                    oreNotturne += 1;
+                }
                 current.setHours(current.getHours() + 1);
             }
             if (oreNotturne > diffOre) oreNotturne = diffOre; // Clamp
@@ -1655,6 +1730,133 @@
                     localStorage.removeItem('storicoIBG');
                     renderStorico();
                 }
+            }
+        }
+
+        let verifyFile = null;
+        function handleVerifyFile(e) {
+            verifyFile = e.target.files[0];
+            if (verifyFile) {
+                document.getElementById('verifyFileName').innerText = verifyFile.name;
+                document.getElementById('btnStartVerify').style.display = 'block';
+            }
+        }
+
+        async function confrontaBustaPaga() {
+            const monthVal = document.getElementById('verify_month').value;
+            if (!monthVal) { alert("Seleziona prima il mese da verificare!"); return; }
+            if (!verifyFile) { alert("Carica prima la busta paga!"); return; }
+
+            const loading = document.getElementById('verifyLoading');
+            const resultDiv = document.getElementById('verificationResult');
+            const btn = document.getElementById('btnStartVerify');
+
+            btn.style.opacity = "0.5";
+            btn.style.pointerEvents = "none";
+            loading.style.display = "block";
+            resultDiv.innerHTML = "";
+
+            try {
+                // 1. Get App Totals for the month
+                const monthItems = storico.filter(i => i.data.startsWith(monthVal));
+                let appTotals = { oreOrd: 0, oreStra: 0, oreNott: 0, lordo: 0 };
+                monthItems.forEach(i => {
+                    const hLavorate = parseFloat(i.oreLavorate) || 0;
+                    const hStra = parseFloat(i.oreStraord) || 0;
+                    appTotals.oreOrd += Math.max(0, hLavorate - hStra);
+                    appTotals.oreStra += hStra;
+                    appTotals.oreNott += parseFloat(i.oreNotturne) || 0;
+                    appTotals.lordo += parseFloat(i.totale) || 0;
+                });
+
+                // 2. Extract Payslip Totals with Gemini
+                const base64Data = await readFileAsBase64(verifyFile);
+                const mimeType = verifyFile.type;
+                const promptText = `
+                    Analizza questa busta paga e trova i TOTALI MENSILI (Competenze/Ore) per il mese di ${monthVal}.
+                    Estrai i seguenti campi in JSON:
+                    - oreOrdinarie: (totale ore base lavorate nel mese)
+                    - oreStraordinarie: (somma di tutte le ore straordinarie del mese)
+                    - oreNotturne: (totale ore indennità/maggiorazione notturna)
+                    - lordoMensile: (totale competenze lorde del mese, es. circa 2000-3000)
+                    
+                    Usa il punto per i decimali. Rispondi SOLO con il JSON.
+                `;
+
+                const modelName = params.geminiModel || "gemini-2.0-flash";
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${params.geminiApiKey}`;
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: promptText }, { inline_data: { mime_type: mimeType, data: base64Data } }] }]
+                    })
+                });
+
+                if (!response.ok) throw new Error("Errore API Gemini");
+                const resJson = await response.json();
+                const textResponse = resJson.candidates[0].content.parts[0].text;
+
+                // Cleanup potentially returned markdown
+                const jsonStr = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+                const payslipData = JSON.parse(jsonStr);
+
+                // 3. Render Comparison
+                const formatDiff = (app, pay) => {
+                    const diff = app - pay;
+                    const color = Math.abs(diff) < 0.1 ? "var(--success)" : "var(--danger)";
+                    return `<span style="color:${color}; font-weight:bold;">${(diff > 0 ? "+" : "") + diff.toFixed(2)}</span>`;
+                };
+
+                resultDiv.innerHTML = `
+                    <div style="background:#f8f9fa; border-radius:12px; padding:20px; border:1px solid #ddd; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+                        <h5 style="margin-top:0; color:var(--primary); font-size:1.1em;">📊 Risultato Confronto (${monthVal})</h5>
+                        <table style="width:100%; font-size:0.9em; border-collapse:collapse; margin-top:10px;">
+                            <tr style="border-bottom:2px solid #eee;">
+                                <th style="text-align:left; padding:10px; color:#666;">Dato</th>
+                                <th style="text-align:right; padding:10px; color:#666;">App</th>
+                                <th style="text-align:right; padding:10px; color:#666;">Busta Paga</th>
+                                <th style="text-align:right; padding:10px; color:#666;">Diff.</th>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ore Ordinarie</td>
+                                <td style="text-align:right;">${appTotals.oreOrd.toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.oreOrdinarie || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreOrd, payslipData.oreOrdinarie || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ore Straord.</td>
+                                <td style="text-align:right;">${appTotals.oreStra.toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.oreStraordinarie || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreStra, payslipData.oreStraordinarie || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ore Notturne</td>
+                                <td style="text-align:right;">${appTotals.oreNott.toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.oreNotturne || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreNott, payslipData.oreNotturne || 0)}</td>
+                            </tr>
+                            <tr style="font-weight:bold; background:#fff;">
+                                <td style="padding:10px;">Lordo Totale</td>
+                                <td style="text-align:right; color:var(--success);">€ ${appTotals.lordo.toFixed(2)}</td>
+                                <td style="text-align:right; color:var(--accent);">€ ${(payslipData.lordoMensile || 0).toFixed(2)}</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.lordo, payslipData.lordoMensile || 0)}</td>
+                            </tr>
+                        </table>
+                        <div style="font-size:0.75em; color:#888; margin-top:15px; background:white; padding:10px; border-radius:6px;">
+                            💡 <strong>Consiglio:</strong> Se le ore coincidono ma il lordo è diverso, verifica eventuali festività non godute, premi o detrazioni fiscali non gestite dall'app.
+                        </div>
+                    </div>
+                `;
+
+            } catch (error) {
+                console.error(error);
+                alert("❌ Errore durante il confronto: " + error.message);
+            } finally {
+                btn.style.opacity = "1";
+                btn.style.pointerEvents = "auto";
+                loading.style.display = "none";
             }
         }
     </script>
