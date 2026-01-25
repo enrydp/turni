@@ -258,6 +258,8 @@
                     <option id="optPomeriggio" value="pomeriggio">Pomeriggio</option>
                     <option id="optNotte" value="notte">Notte</option>
                     <option value="centrale">Centrale (08:00 - 17:00)</option>
+                    <option value="festivo">Festivo</option>
+                    <option value="festivo_domenicale">Festivo Domenicale</option>
                     <option value="permesso">Permesso Retribuito</option>
                     <option value="malattia">Malattia</option>
                 </select>
@@ -684,15 +686,27 @@
             const savedParams = localStorage.getItem('paramsIBG');
             if (savedParams) {
                 params = JSON.parse(savedParams);
-                // Retrocompatibilità
-                if (params.maggStraord > 10) params.maggStraord = ((params.maggStraord - 1) * 100);
-                if (!params.payslips) params.payslips = [];
-                if (!params.indemnities) params.indemnities = { mattina: true, pomeriggio: true, notte: true };
-                if (!params.shiftStart) params.shiftStart = "06:00";
-                if (!params.geminiApiKey) params.geminiApiKey = "AIzaSyAI0Sz3d51AWXNkadAawwZihqslC46R5uE";
-                // Ensure default 45% if it was the old 1.45 or missing
-                if (params.maggStraord === 1.45 || params.maggStraord === undefined) params.maggStraord = 0.45;
-                // Update to gemini-2.0-flash if using old default
+                // Corrected migration for maggStraord:
+                // If > 10 (e.g. 45 or 145), it's a percentage. 
+                // If it's between 1 and 2 (e.g. 1.45), it's an old multiplier (1 + extra).
+                // We want to store only the "extra" decimal (e.g. 0.45).
+                const sanitizeMagg = (val) => {
+                    if (val === undefined || val === null) return 0.45;
+                    if (val > 10) return (val >= 100) ? (val / 100) - 1 : val / 100;
+                    if (val > 1 && val < 2) return val - 1;
+                    return val;
+                };
+
+                params.maggStraord = sanitizeMagg(params.maggStraord);
+
+                if (params.payslips) {
+                    params.payslips.forEach(p => {
+                        if (p.components) {
+                            p.components.maggStraord = sanitizeMagg(p.components.maggStraord);
+                        }
+                    });
+                }
+
                 if (params.geminiModel === "gemini-1.5-flash" || !params.geminiModel) params.geminiModel = "gemini-2.0-flash";
                 if (params.lastAutoBackup === undefined) params.lastAutoBackup = 0;
             }
@@ -810,10 +824,18 @@
                     inizio.value = "08:00";
                     fine.value = "17:00";
                     break;
+                case 'festivo':
+                case 'festivo_domenicale':
                 case 'permesso':
                 case 'malattia':
                     orariDiv.style.opacity = "0.5";
-                    ferieDiv.value = 8;
+                    // Reset permessi for holidays, but keep 8 for permesso/malattia
+                    if (tipo === 'festivo' || tipo === 'festivo_domenicale') {
+                        ferieDiv.value = 0;
+                    } else {
+                        ferieDiv.value = 8;
+                    }
+
                     // Hide straordinario field for these types
                     straordinarioDiv.style.opacity = "0.5";
                     straordinarioDiv.style.pointerEvents = "none";
@@ -1212,9 +1234,7 @@
             if (d2 <= d1) d2.setDate(d2.getDate() + 1);
             let diffOre = (d2 - d1) / 1000 / 60 / 60;
 
-            if (tipoTurno === 'permesso') {
-                diffOre = 0;
-            } else if (tipoTurno === 'malattia') {
+            if (tipoTurno === 'permesso' || tipoTurno === 'malattia' || tipoTurno === 'festivo' || tipoTurno === 'festivo_domenicale') {
                 diffOre = 0;
             }
 
@@ -1232,12 +1252,15 @@
 
                 let isOvertime = isWeekend || (current >= endOrdinary);
 
-                if (isNight && !isOvertime) {
+                // User Request: Night shift (indennità notturna) only for shifts starting at 22:00 or 00:00 (or type 'notte')
+                const shiftStartsAtNight = (hInizioStr === "22:00" || hInizioStr === "00:00" || tipoTurno === 'notte');
+
+                if (isNight && !isOvertime && shiftStartsAtNight) {
                     oreNotturne += 1;
                 }
                 current.setHours(current.getHours() + 1);
             }
-            if (oreNotturne > diffOre) oreNotturne = diffOre;
+            if (oreNotturne > diffOre && diffOre > 0) oreNotturne = diffOre;
 
             // Calcoli Importi
             let pagaOraria = usedParams.pagaBase;
@@ -1247,22 +1270,32 @@
             let importoFerie = 0;
             let importoIndTurno = 0;
 
-            let oreOridinarieCalcolate = diffOre;
+            let oreOridinarieCalcolate = Math.max(0, diffOre - inputStraord);
             let oreStraordinarieCalcolate = inputStraord;
 
             if (['mattina', 'pomeriggio', 'notte', 'centrale'].includes(tipoTurno)) {
                 if (diffOre >= 8 && inputFerie > 0) {
-                    oreOridinarieCalcolate = Math.max(0, diffOre - inputFerie);
+                    oreOridinarieCalcolate = Math.max(0, oreOridinarieCalcolate - inputFerie);
                 }
             }
 
-            if (isWeekend) {
+            if (tipoTurno === 'festivo') {
+                oreOridinarieCalcolate = 8;
+                oreStraordinarieCalcolate = 0;
+            } else if (tipoTurno === 'festivo_domenicale') {
+                // User Request: Festivo Domenicale = 8 hours ordinary + 6.66 bonus = 14.66 total ordinary
+                oreOridinarieCalcolate = 14.66;
+                oreStraordinarieCalcolate = 0;
+            } else if (isWeekend) {
                 oreStraordinarieCalcolate += diffOre;
                 oreOridinarieCalcolate = 0;
             }
 
             importoOrdinario = oreOridinarieCalcolate * pagaOraria;
-            let tassoStraord = pagaOraria * (1 + usedParams.maggStraord);
+            // Robust calculation: if maggStraord is > 1 (e.g. 1.45), it's already a multiplier. If < 1 (e.g. 0.45), it's the extra part.
+            let magg = usedParams.maggStraord || 0;
+            let multiplier = (magg > 1) ? magg : (1 + magg);
+            let tassoStraord = pagaOraria * multiplier;
             importoStraordinario = oreStraordinarieCalcolate * tassoStraord;
             importoNotturno = oreNotturne * usedParams.indNotturna;
 
