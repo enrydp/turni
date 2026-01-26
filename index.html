@@ -277,7 +277,7 @@
                 </div>
             </div>
 
-            <div class="input-group" id="straordinarioDiv" style="display:flex; gap:10px;">
+            <div class="input-group" id="straordinarioDiv" style="display:none; gap:10px;">
                 <div style="flex:1">
                     <label>Straordinari (ore)</label>
                     <input type="number" id="oreStraordinario" step="0.5" value="0" min="0">
@@ -378,9 +378,30 @@
                     </button>
                 </div>
 
+                <!-- TAXATION SUMMARY -->
+                <div id="taxSummary"
+                    style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin-bottom:15px; background:#fff; padding:15px; border-radius:10px; box-shadow:0 3px 10px rgba(0,0,0,0.05); border: 1px solid #eee;">
+                    <div style="text-align:center; border-right:1px solid #eee;">
+                        <div style="font-size:0.7em; color:#888; text-transform:uppercase; margin-bottom:4px;">Tot.
+                            Lordo</div>
+                        <div style="font-weight:bold; color:var(--primary); font-size:1em;" id="valTotalLordo">€ 0.00
+                        </div>
+                    </div>
+                    <div style="text-align:center; border-right:1px solid #eee;">
+                        <div style="font-size:0.7em; color:#888; text-transform:uppercase; margin-bottom:4px;">Netto
+                            Stim.</div>
+                        <div style="font-weight:bold; color:var(--success); font-size:1em;" id="valTotalNetto">€ 0.00
+                        </div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-size:0.7em; color:#888; text-transform:uppercase; margin-bottom:4px;">Valore
+                            Ticket</div>
+                        <div style="font-weight:bold; color:#c0392b; font-size:1em;" id="valTotalTicket">€ 0.00</div>
+                    </div>
+                </div>
+
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                     <strong>Storico Turni</strong>
-                    <span id="totaleMensile" style="font-weight:bold; color:var(--success)">€ 0.00</span>
                 </div>
                 <div id="listaStorico"></div>
             </div>
@@ -444,6 +465,12 @@
                 <div class="input-group">
                     <label>Indennità Festiva (Oraria)</label>
                     <input type="number" id="indFestiva" step="0.01">
+                </div>
+
+                <div class="input-group">
+                    <label>Percentuale Tassazione Stimata (%)</label>
+                    <input type="number" id="taxRate" step="0.1" value="23">
+                    <small style="color:#777">Es: 23 per una tassazione media del 23%</small>
                 </div>
 
                 <!-- Scatti Anzianità Removed from UI as requested -->
@@ -681,11 +708,12 @@
             indFestiva: 12.97572,
             scattiAnz: 145.30,
             fbConfig: "",
-            geminiApiKey: "AIzaSyAI0Sz3d51AWXNkadAawwZihqslC46R5uE",
+            geminiApiKey: "",
             geminiModel: "gemini-2.0-flash",
             payslips: [],
             shiftStart: "06:00",
             indemnities: { mattina: true, pomeriggio: true, notte: true },
+            taxRate: 23,
             lastAutoBackup: 0
         };
         let storico = [];
@@ -858,7 +886,11 @@
 
         function gestisciAutomaticamentePermessi() {
             const tipo = document.getElementById('tipoTurno').value;
-            if (['mattina', 'pomeriggio', 'notte'].includes(tipo)) {
+            const dataStr = document.getElementById('dataTurno').value;
+            const oreStraordInput = document.getElementById('oreStraordinario');
+            const oreFerieInput = document.getElementById('oreFerie');
+
+            if (['mattina', 'pomeriggio', 'notte', 'centrale'].includes(tipo)) {
                 const hInizioStr = document.getElementById('inizio').value;
                 const hFineStr = document.getElementById('fine').value;
 
@@ -867,11 +899,35 @@
                 if (d2 <= d1) d2.setDate(d2.getDate() + 1);
                 let diffOre = (d2 - d1) / 1000 / 60 / 60;
 
-                if (diffOre < 8) {
-                    document.getElementById('oreFerie').value = (8 - diffOre);
+                const dateObj = new Date(dataStr);
+                const isSaturday = dateObj.getDay() === 6;
+                const isSunday = dateObj.getDay() === 0;
+
+                if (isSaturday || isSunday) {
+                    // Sabato/Domenica: tutto straordinario, no permessi
+                    oreStraordInput.value = diffOre;
+                    oreFerieInput.value = 0;
                 } else {
-                    document.getElementById('oreFerie').value = 0;
+                    // Feriali: >8 extra, <8 permesso
+                    if (diffOre > 8) {
+                        oreStraordInput.value = (diffOre - 8);
+                        oreFerieInput.value = 0;
+                    } else if (diffOre < 8) {
+                        oreStraordInput.value = 0;
+                        oreFerieInput.value = (8 - diffOre);
+                    } else {
+                        oreStraordInput.value = 0;
+                        oreFerieInput.value = 0;
+                    }
                 }
+            } else {
+                // Per tipi non-lavorativi (ferie, malattia, ecc.)
+                if (tipo === 'permesso' || tipo === 'ferie' || tipo === 'malattia') {
+                    oreFerieInput.value = 8;
+                } else {
+                    oreFerieInput.value = 0;
+                }
+                oreStraordInput.value = 0;
             }
         }
 
@@ -1321,7 +1377,7 @@
             if (tipoTurno === 'notte' && currentParams.indemnities.notte) applyTurno = true;
 
             if (applyTurno) {
-                importoIndTurno = diffOre * (usedParams.indTurno || 0);
+                importoIndTurno = oreOridinarieCalcolate * (usedParams.indTurno || 0);
             }
 
             importoFerie = inputFerie * pagaOraria;
@@ -1374,13 +1430,13 @@
             res.style.display = 'block';
             res.innerHTML = `
                 <strong>Totale Giornaliero:</strong><br>
-                <span style="font-size:1.4em; color:var(--success)">€ ${ultimoCalcolo.totale.toFixed(2)}</span><br>
+                <span style="font-size:1.4em; color:var(--success)">€ ${(ultimoCalcolo.totale || 0).toFixed(2)}</span><br>
                 <table style="width:100%; font-size:0.85em; margin-top:10px; color:#555;">
                     <tr><td>Ordinario:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.ord.toFixed(2)}</td></tr>
                     ${ultimoCalcolo.dettagli.stra > 0 ? `<tr><td>Straordinario:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.stra.toFixed(2)}</td></tr>` : ''}
                     ${ultimoCalcolo.dettagli.nott > 0 ? `<tr><td>Ind. Notturna:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.nott.toFixed(2)}</td></tr>` : ''}
                     ${ultimoCalcolo.dettagli.turn > 0 ? `<tr><td>Ind. Turno:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.turn.toFixed(2)}</td></tr>` : ''}
-                    ${ultimoCalcolo.dettagli.ferie > 0 ? `<tr><td>Ferie/Permessi:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.ferie.toFixed(2)}</td></tr>` : ''}
+                    ${ultimoCalcolo.dettagli.ferie > 0 ? `<tr><td>${ultimoCalcolo.tipo === 'malattia' ? 'Malattia' : (ultimoCalcolo.tipo === 'ferie' ? 'Ferie' : 'Permessi')}:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.ferie.toFixed(2)}</td></tr>` : ''}
                     <tr><td>Ticket:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.ticket.toFixed(2)}</td></tr>
                     <tr><td>Scatti (rateo):</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.scatti.toFixed(2)}</td></tr>
                 </table>
@@ -1425,14 +1481,12 @@
 
         function renderStorico() {
             const lista = document.getElementById('listaStorico');
-            const totDiv = document.getElementById('totaleMensile');
 
             const filtroMese = document.getElementById('filtroMese').value;
             const filtroDal = document.getElementById('filtroDal').value;
             const filtroAl = document.getElementById('filtroAl').value;
 
             lista.innerHTML = '';
-            let somma = 0;
 
             // Sort
             storico.sort((a, b) => new Date(b.data) - new Date(a.data));
@@ -1449,7 +1503,8 @@
             const currentFilterItems = visibleItems; // For stats calc below
 
             // Stats Accumulators
-            let totOrd = 0, totStra = 0, totNott = 0, totFerie = 0, totPermessi = 0, totTicket = 0;
+            let totOrd = 0, totStra = 0, totNott = 0, totFerie = 0, totPermessi = 0, totMalattia = 0, totTicket = 0;
+            let valLordo = 0, valTicketEuro = 0;
 
             // Stats Calc
             currentFilterItems.forEach(item => {
@@ -1476,13 +1531,19 @@
 
                 if (item.tipo === 'ferie') {
                     totFerie += hFerie;
+                } else if (item.tipo === 'malattia') {
+                    totMalattia += hFerie;
                 } else {
                     totPermessi += hFerie;
                 }
 
                 if (item.dettagli && item.dettagli.ticket > 0) {
                     totTicket += 1;
+                    valTicketEuro += (parseFloat(item.dettagli.ticket) || 0);
                 }
+
+                // Gross calculation = total - ticket
+                valLordo += (parseFloat(item.totale) || 0) - (parseFloat(item.dettagli ? item.dettagli.ticket : 0) || 0);
             });
 
             // --- RE-RENDER DASHBOARD DYNAMICALLY ---
@@ -1521,11 +1582,25 @@
                         <div style="font-size:0.75em; color:#555;">PERMESSI</div>
                         <div style="font-weight:bold; color:#d35400;">${totPermessi.toFixed(1)}h</div>
                     </button>
+                    <button onclick="filterByStat('malattia')" style="background:#fdedec; border:1px solid #fadbd8; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('malattia')}">
+                        <div style="font-size:0.75em; color:#555;">MALATTIA</div>
+                        <div style="font-weight:bold; color:#cb4335;">${totMalattia.toFixed(1)}h</div>
+                    </button>
                     <button onclick="filterByStat('ticket')" style="background:#f9ebea; border:1px solid #f2d7d5; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('ticket')}">
                         <div style="font-size:0.75em; color:#555;">TICKET</div>
                         <div style="font-weight:bold; color:#c0392b;">${totTicket}</div>
                     </button>
                 `;
+            }
+
+            // Update Tax Summary
+            const taxRate = (params.taxRate || 0) / 100;
+            const nettoStimato = valLordo * (1 - taxRate);
+
+            if (document.getElementById('valTotalLordo')) {
+                document.getElementById('valTotalLordo').innerText = `€ ${valLordo.toFixed(2)}`;
+                document.getElementById('valTotalNetto').innerText = `€ ${nettoStimato.toFixed(2)}`;
+                document.getElementById('valTotalTicket').innerText = `€ ${valTicketEuro.toFixed(2)}`;
             }
 
             // Filter by Active Stat
@@ -1541,7 +1616,8 @@
                     if (currentStatFilter === 'stra') return hStra > 0;
                     if (currentStatFilter === 'nott') return hNott > 0;
                     if (currentStatFilter === 'ferie') return item.tipo === 'ferie';
-                    if (currentStatFilter === 'permessi') return (item.tipo === 'permesso' || (item.tipo !== 'ferie' && hFerie > 0));
+                    if (currentStatFilter === 'malattia') return item.tipo === 'malattia';
+                    if (currentStatFilter === 'permessi') return (item.tipo === 'permesso' || (item.tipo !== 'ferie' && item.tipo !== 'malattia' && hFerie > 0));
                     if (currentStatFilter === 'ticket') return item.dettagli && item.dettagli.ticket > 0;
                     return true;
                 });
@@ -1549,21 +1625,21 @@
 
             if (visibleItems.length === 0) {
                 lista.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">Nessun turno trovato.</div>';
-                totDiv.innerText = '€ 0.00';
             }
 
             visibleItems.forEach(item => {
-                somma += item.totale;
-
                 // Build Cost Details HTML
                 let detailsHtml = '<div style="margin-top:8px; font-size:0.85em; color:#555; display:grid; grid-template-columns: 1fr 1fr; gap:5px;">';
-                if (item.dettagli.ord > 0) detailsHtml += `<div>Ord: €${item.dettagli.ord.toFixed(2)}</div>`;
-                if (item.dettagli.stra > 0) detailsHtml += `<div>Stra: €${item.dettagli.stra.toFixed(2)}</div>`;
-                if (item.dettagli.nott > 0) detailsHtml += `<div>Nott: €${item.dettagli.nott.toFixed(2)}</div>`;
-                if (item.dettagli.turn > 0) detailsHtml += `<div>Turno: €${item.dettagli.turn.toFixed(2)}</div>`;
-                if (item.dettagli.ticket > 0) detailsHtml += `<div>Ticket: €${item.dettagli.ticket.toFixed(2)}</div>`;
-                if (item.dettagli.ferie > 0) detailsHtml += `<div>Permessi: €${item.dettagli.ferie.toFixed(2)}</div>`;
-                if (item.dettagli.scatti > 0) detailsHtml += `<div>Scatti: €${item.dettagli.scatti.toFixed(2)}</div>`;
+                if (item.dettagli && item.dettagli.ord > 0) detailsHtml += `<div>Ord: €${(item.dettagli.ord || 0).toFixed(2)}</div>`;
+                if (item.dettagli && item.dettagli.stra > 0) detailsHtml += `<div>Stra: €${(item.dettagli.stra || 0).toFixed(2)}</div>`;
+                if (item.dettagli && item.dettagli.nott > 0) detailsHtml += `<div>Nott: €${(item.dettagli.nott || 0).toFixed(2)}</div>`;
+                if (item.dettagli && item.dettagli.turn > 0) detailsHtml += `<div>Turno: €${(item.dettagli.turn || 0).toFixed(2)}</div>`;
+                if (item.dettagli && item.dettagli.ticket > 0) detailsHtml += `<div>Ticket: €${(item.dettagli.ticket || 0).toFixed(2)}</div>`;
+                if (item.dettagli && item.dettagli.ferie > 0) {
+                    const label = item.tipo === 'malattia' ? 'Malattia' : (item.tipo === 'ferie' ? 'Ferie' : 'Permessi');
+                    detailsHtml += `<div>${label}: €${(item.dettagli.ferie || 0).toFixed(2)}</div>`;
+                }
+                if (item.dettagli && item.dettagli.scatti > 0) detailsHtml += `<div>Scatti: €${(item.dettagli.scatti || 0).toFixed(2)}</div>`;
                 detailsHtml += '</div>';
 
                 lista.innerHTML += `
@@ -1573,7 +1649,7 @@
                         <span style="font-weight:bold; font-size:1.1em; color:#2c3e50">${new Date(item.data).toLocaleDateString('it-IT')}</span>
                         <span style="font-size:0.8em; background:#f0f2f5; padding:2px 6px; border-radius:4px; margin-left:5px;">${item.tipo.toUpperCase()}</span>
                     </div>
-                    <span style="font-weight:bold; font-size:1.2em; color:var(--success)">€ ${item.totale.toFixed(2)}</span>
+                    <span style="font-weight:bold; font-size:1.2em; color:var(--success)">€ ${(item.totale || 0).toFixed(2)}</span>
                 </div>
                 
                 <div style="width:100%;">
@@ -1594,8 +1670,8 @@
                     </div>
                 </div>
             </div>`;
+                // Totale mensile removed as redundant with new dashboard
             });
-            totDiv.innerText = `€ ${somma.toFixed(2)}`;
         }
 
         function salvaTurno() {
@@ -1756,13 +1832,16 @@
                 doc.text(item.data.split('-').reverse().join('/'), 14, y);
                 doc.text(item.tipo.substring(0, 10), 40, y);
                 doc.text(`${item.oreLavorate}h`, 80, y);
-                doc.text(`€ ${item.totale.toFixed(2)}`, 110, y);
+                doc.text(`€ ${(item.totale || 0).toFixed(2)}`, 110, y);
 
                 // Short breakdown
                 let details = [];
-                if (item.dettagli.stra > 0) details.push(`Str:€${item.dettagli.stra.toFixed(0)}`);
-                if (item.dettagli.nott > 0) details.push(`Not:€${item.dettagli.nott.toFixed(0)}`);
-                if (item.dettagli.ferie > 0) details.push(`Fer:€${item.dettagli.ferie.toFixed(0)}`);
+                if (item.dettagli && item.dettagli.stra > 0) details.push(`Str:€${(item.dettagli.stra || 0).toFixed(0)}`);
+                if (item.dettagli && item.dettagli.nott > 0) details.push(`Not:€${(item.dettagli.nott || 0).toFixed(0)}`);
+                if (item.dettagli && item.dettagli.ferie > 0) {
+                    const lbl = item.tipo === 'malattia' ? 'Mal' : (item.tipo === 'ferie' ? 'Fer' : 'Per');
+                    details.push(`${lbl}:€${(item.dettagli.ferie || 0).toFixed(0)}`);
+                }
                 doc.text(details.join(', '), 140, y);
 
                 y += 7;
@@ -1775,14 +1854,18 @@
             doc.text(`TOTALE: € ${totalMonth.toFixed(2)}`, 14, y);
 
             // Stats for report calc
-            let rTotOrd = 0, rTotStra = 0, rTotNott = 0, rTotFerie = 0;
+            let rTotOrd = 0, rTotStra = 0, rTotNott = 0, rTotFerie = 0, rTotPerm = 0, rTotMal = 0;
             visibleItems.forEach(item => {
                 let hLavorate = parseFloat(item.oreLavorate) || 0;
                 let hStra = parseFloat(item.oreStraord) || 0;
                 let hNott = parseFloat(item.oreNotturne) || 0;
                 let hFerie = parseFloat(item.oreFerie) || 0;
                 let hOrd = Math.max(0, hLavorate - hStra);
-                rTotOrd += hOrd; rTotStra += hStra; rTotNott += hNott; rTotFerie += hFerie;
+                rTotOrd += hOrd; rTotStra += hStra; rTotNott += hNott;
+
+                if (item.tipo === 'ferie') rTotFerie += hFerie;
+                else if (item.tipo === 'malattia') rTotMal += hFerie;
+                else rTotPerm += hFerie;
             });
 
             // Hours Breakdown Table
@@ -1796,7 +1879,10 @@
             doc.text(`Straordinarie:  ${rTotStra.toFixed(1)} h`, 70, y);
             y += 6;
             doc.text(`Notturne:   ${rTotNott.toFixed(1)} h`, 14, y);
-            doc.text(`Ferie/Perm/Mal: ${rTotFerie.toFixed(1)} h`, 70, y);
+            doc.text(`Ferie:  ${rTotFerie.toFixed(1)} h`, 70, y);
+            y += 6;
+            doc.text(`Permessi:   ${rTotPerm.toFixed(1)} h`, 14, y);
+            doc.text(`Malattia:  ${rTotMal.toFixed(1)} h`, 70, y);
 
             const filename = currentSearchMode === 'month' ? `Report_Turni_${filtroMese}.pdf` : `Report_Turni_Ricerca.pdf`;
             doc.save(filename);
@@ -1843,6 +1929,7 @@
             document.getElementById('scattiAnz').value = params.scattiAnz;
             document.getElementById('fbConfig').value = params.fbConfig;
             document.getElementById('geminiApiKey').value = params.geminiApiKey || "";
+            document.getElementById('taxRate').value = params.taxRate || 23;
 
             // New Settings
             const sel = document.getElementById('geminiModelSelect');
@@ -1915,6 +2002,7 @@
             params.fbConfig = document.getElementById('fbConfig').value;
             params.geminiApiKey = document.getElementById('geminiApiKey').value;
             params.geminiModel = document.getElementById('geminiModelSelect').value;
+            params.taxRate = parseFloat(document.getElementById('taxRate').value) || 0;
 
             // Save New Settings
             params.shiftStart = document.getElementById('shiftStart').value;
