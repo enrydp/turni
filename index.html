@@ -707,7 +707,7 @@
                     });
                 }
 
-                if (params.geminiModel === "gemini-1.5-flash" || !params.geminiModel) params.geminiModel = "gemini-2.0-flash";
+                if (!params.geminiModel) params.geminiModel = "gemini-2.0-flash";
                 if (params.lastAutoBackup === undefined) params.lastAutoBackup = 0;
             }
 
@@ -1814,7 +1814,24 @@
 
             // New Settings
             const sel = document.getElementById('geminiModelSelect');
-            if (sel) sel.value = params.geminiModel || "gemini-1.5-flash";
+            if (sel) {
+                const modelValue = params.geminiModel || "gemini-2.0-flash";
+                // Ensure the saved model exists in the dropdown
+                let exists = false;
+                for (let i = 0; i < sel.options.length; i++) {
+                    if (sel.options[i].value === modelValue) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    const opt = document.createElement('option');
+                    opt.value = modelValue;
+                    opt.text = modelValue;
+                    sel.appendChild(opt);
+                }
+                sel.value = modelValue;
+            }
 
             const shiftSel = document.getElementById('shiftStart');
             if (shiftSel) shiftSel.value = params.shiftStart || "06:00";
