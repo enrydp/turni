@@ -1335,7 +1335,7 @@
             let importoOrdinario = 0;
             let importoStraordinario = 0;
             let importoNotturno = 0;
-            let importoFerie = 0;
+            importoFerie = 0;
             let importoIndTurno = 0;
 
             let oreOridinarieCalcolate = Math.max(0, diffOre - inputStraord);
@@ -1359,7 +1359,7 @@
                 oreOridinarieCalcolate = 0;
             }
 
-            importoOrdinario = oreOridinarieCalcolate * pagaOraria;
+            importoOrdinario = (tipoTurno === 'festivo' || tipoTurno === 'festivo_domenicale') ? 0 : (oreOridinarieCalcolate * pagaOraria);
             // Robust calculation: if maggStraord is > 1 (e.g. 1.45), it's already a multiplier. If < 1 (e.g. 0.45), it's the extra part.
             let magg = usedParams.maggStraord || 0;
             let multiplier = (magg > 1) ? magg : (1 + magg);
@@ -1381,10 +1381,16 @@
             }
 
             importoFerie = inputFerie * pagaOraria;
-            let importoTicket = (diffOre >= 4) ? (usedParams.ticketMensa || 0) : 0;
+            let importoTicket = (diffOre >= 6) ? (usedParams.ticketMensa || 0) : 0;
+            let importoFestivo = 0;
+
+            if (tipoTurno === 'festivo' || tipoTurno === 'festivo_domenicale') {
+                importoFestivo = oreOridinarieCalcolate * (usedParams.indFestiva || 0);
+            }
+
             let importoScatti = 0;
 
-            let totaleGiorno = importoOrdinario + importoStraordinario + importoNotturno + importoIndTurno + importoFerie + importoTicket + importoScatti;
+            let totaleGiorno = importoOrdinario + importoStraordinario + importoNotturno + importoIndTurno + importoFerie + importoTicket + importoScatti + importoFestivo;
 
             return {
                 data: dataStr,
@@ -1401,7 +1407,8 @@
                     turn: importoIndTurno,
                     ferie: importoFerie,
                     ticket: importoTicket,
-                    scatti: importoScatti
+                    scatti: importoScatti,
+                    festivo: importoFestivo
                 },
                 totale: totaleGiorno,
                 isWeekend: isWeekend
@@ -1437,6 +1444,7 @@
                     ${ultimoCalcolo.dettagli.nott > 0 ? `<tr><td>Ind. Notturna:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.nott.toFixed(2)}</td></tr>` : ''}
                     ${ultimoCalcolo.dettagli.turn > 0 ? `<tr><td>Ind. Turno:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.turn.toFixed(2)}</td></tr>` : ''}
                     ${ultimoCalcolo.dettagli.ferie > 0 ? `<tr><td>${ultimoCalcolo.tipo === 'malattia' ? 'Malattia' : (ultimoCalcolo.tipo === 'ferie' ? 'Ferie' : 'Permessi')}:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.ferie.toFixed(2)}</td></tr>` : ''}
+                    ${ultimoCalcolo.dettagli.festivo > 0 ? `<tr><td>Ind. Festiva:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.festivo.toFixed(2)}</td></tr>` : ''}
                     <tr><td>Ticket:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.ticket.toFixed(2)}</td></tr>
                     <tr><td>Scatti (rateo):</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.scatti.toFixed(2)}</td></tr>
                 </table>
@@ -1639,6 +1647,7 @@
                     const label = item.tipo === 'malattia' ? 'Malattia' : (item.tipo === 'ferie' ? 'Ferie' : 'Permessi');
                     detailsHtml += `<div>${label}: €${(item.dettagli.ferie || 0).toFixed(2)}</div>`;
                 }
+                if (item.dettagli && item.dettagli.festivo > 0) detailsHtml += `<div>Festivo: €${(item.dettagli.festivo || 0).toFixed(2)}</div>`;
                 if (item.dettagli && item.dettagli.scatti > 0) detailsHtml += `<div>Scatti: €${(item.dettagli.scatti || 0).toFixed(2)}</div>`;
                 detailsHtml += '</div>';
 
@@ -1896,12 +1905,15 @@
             doc.setFontSize(12);
             doc.text(`Data: ${ultimoCalcolo.data}`, 20, 35);
             doc.text(`Prestazione: ${ultimoCalcolo.tipo}`, 20, 45);
-            doc.text(`Ore Totali: ${ultimoCalcolo.oreTotali}h`, 20, 55);
-            doc.text(`Indennità Notturna (N08118): ${ultimoCalcolo.oreNotturne}h - EUR ${ultimoCalcolo.lordoNotturno.toFixed(2)}`, 20, 65);
-            doc.text(`Indennità Turno: EUR ${ultimoCalcolo.indTurnoTot.toFixed(2)}`, 20, 75);
-            doc.text(`Ticket Mensa: EUR ${ultimoCalcolo.ticket.toFixed(2)}`, 20, 85);
+            doc.text(`Ore Totali: ${ultimoCalcolo.oreLavorate}h`, 20, 55);
+            doc.text(`Indennità Notturna: ${ultimoCalcolo.oreNotturne}h - EUR ${ultimoCalcolo.dettagli.nott.toFixed(2)}`, 20, 65);
+            doc.text(`Indennità Turno: EUR ${ultimoCalcolo.dettagli.turn.toFixed(2)}`, 20, 75);
+            doc.text(`Ticket Mensa: EUR ${ultimoCalcolo.dettagli.ticket.toFixed(2)}`, 20, 85);
+            if (ultimoCalcolo.dettagli && ultimoCalcolo.dettagli.festivo > 0) {
+                doc.text(`Indennità Festiva: EUR ${ultimoCalcolo.dettagli.festivo.toFixed(2)}`, 20, 95);
+            }
             if (ultimoCalcolo.scattiGnaliero > 0) {
-                doc.text(`Scatti Anzianità (quota gg): EUR ${ultimoCalcolo.scattiGnaliero.toFixed(2)}`, 20, 95);
+                doc.text(`Scatti Anzianità (quota gg): EUR ${ultimoCalcolo.scattiGnaliero.toFixed(2)}`, 20, 105);
             }
             doc.text(`--------------------------------------------------`, 20, 105);
             doc.text(`LORDO TOTALE: EUR ${ultimoCalcolo.totale.toFixed(2)}`, 20, 115);
