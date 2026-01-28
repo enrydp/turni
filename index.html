@@ -1380,7 +1380,15 @@
                 importoIndTurno = oreOridinarieCalcolate * (usedParams.indTurno || 0);
             }
 
-            importoFerie = inputFerie * pagaOraria;
+            // New logic for ferie and permessi rate
+            let tassoFerie = pagaOraria; // Default to pagaBase
+            if (tipoTurno === 'ferie' || tipoTurno === 'permesso') {
+                tassoFerie = usedParams.indFestiva || 0;
+            } else if (tipoTurno !== 'malattia' && inputFerie > 0) {
+                // Partial permit in a working shift
+                tassoFerie = usedParams.indFestiva || 0;
+            }
+            importoFerie = inputFerie * tassoFerie;
             let importoTicket = (diffOre >= 6) ? (usedParams.ticketMensa || 0) : 0;
             let importoFestivo = 0;
 
