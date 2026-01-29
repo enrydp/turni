@@ -467,6 +467,22 @@
                     <input type="number" id="indFestiva" step="0.01">
                 </div>
 
+                <div class="input-group"
+                    style="background:#f0f7ff; padding:10px; border-radius:8px; border:1px solid #d0e3ff;">
+                    <label style="font-weight:bold; color:#0056b3; margin-bottom:10px; display:block;">Tipo di
+                        Contratto</label>
+                    <div style="display:flex; gap:15px; align-items:center;">
+                        <label
+                            style="display:flex; align-items:center; gap:5px; cursor:pointer; margin:0; font-weight:normal;">
+                            <input type="radio" name="contractType" value="160" style="width:auto;"> 160 Ore
+                        </label>
+                        <label
+                            style="display:flex; align-items:center; gap:5px; cursor:pointer; margin:0; font-weight:normal;">
+                            <input type="radio" name="contractType" value="173" style="width:auto;"> 173 Ore
+                        </label>
+                    </div>
+                </div>
+
                 <div class="input-group">
                     <label>Percentuale Tassazione Stimata (%)</label>
                     <input type="number" id="taxRate" step="0.1" value="23">
@@ -714,7 +730,8 @@
             shiftStart: "06:00",
             indemnities: { mattina: true, pomeriggio: true, notte: true },
             taxRate: 23,
-            lastAutoBackup: 0
+            lastAutoBackup: 0,
+            contractType: "160"
         };
         let storico = [];
         let ultimoCalcolo = {};
@@ -1562,6 +1579,14 @@
                 valLordo += (parseFloat(item.totale) || 0) - (parseFloat(item.dettagli ? item.dettagli.ticket : 0) || 0);
             });
 
+            // ADD CONTRACT 173h BONUS (13h * pagaBase)
+            let contractBonus = 0;
+            if (params.contractType === '173' && currentSearchMode === 'month') {
+                const monthlyParams = getParamsForDate(filtroMese + "-01");
+                contractBonus = 13 * (monthlyParams.pagaBase || 0);
+                valLordo += contractBonus;
+            }
+
             // --- RE-RENDER DASHBOARD DYNAMICALLY ---
             // This ensures we always update the visible elements and avoid ID collisions
             const dashboard = document.getElementById('statsDashboard');
@@ -1606,6 +1631,12 @@
                         <div style="font-size:0.75em; color:#555;">TICKET</div>
                         <div style="font-weight:bold; color:#c0392b;">${totTicket}</div>
                     </button>
+                    ${params.contractType === '173' && currentSearchMode === 'month' ? `
+                    <div style="background:#f0f7ff; border:1px solid #d0e3ff; padding:10px; border-radius:8px; text-align:center; display:flex; flex-direction:column; justify-content:center;">
+                        <div style="font-size:0.7em; color:#0056b3; font-weight:bold; text-transform:uppercase;">CONTRATTO 173H</div>
+                        <div style="font-weight:bold; color:#0056b3;">€ ${contractBonus.toFixed(2)}</div>
+                    </div>
+                    ` : ''}
                 `;
             }
 
@@ -1980,6 +2011,17 @@
                 document.getElementById('checkIndPomeriggio').checked = params.indemnities.pomeriggio;
                 document.getElementById('checkIndNotte').checked = params.indemnities.notte;
             }
+
+            if (params.contractType) {
+                const radios = document.getElementsByName('contractType');
+                radios.forEach(r => {
+                    if (r.value === params.contractType) r.checked = true;
+                });
+            } else {
+                // Default to 160
+                const radios = document.getElementsByName('contractType');
+                if (radios.length > 0) radios[0].checked = true;
+            }
         }
 
         function ricalcolaStoricoInCorso() {
@@ -2031,6 +2073,11 @@
                 pomeriggio: document.getElementById('checkIndPomeriggio').checked,
                 notte: document.getElementById('checkIndNotte').checked
             };
+
+            const radios = document.getElementsByName('contractType');
+            radios.forEach(r => {
+                if (r.checked) params.contractType = r.value;
+            });
 
             localStorage.setItem('paramsIBG', JSON.stringify(params));
 
