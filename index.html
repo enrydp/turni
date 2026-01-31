@@ -1372,7 +1372,7 @@
                 oreOridinarieCalcolate = 14.66;
                 oreStraordinarieCalcolate = 0;
             } else if (isWeekend) {
-                oreStraordinarieCalcolate += diffOre;
+                oreStraordinarieCalcolate += oreOridinarieCalcolate;
                 oreOridinarieCalcolate = 0;
             }
 
@@ -1471,7 +1471,7 @@
                     ${ultimoCalcolo.dettagli.ferie > 0 ? `<tr><td>${ultimoCalcolo.tipo === 'malattia' ? 'Malattia' : (ultimoCalcolo.tipo === 'ferie' ? 'Ferie' : 'Permessi')}:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.ferie.toFixed(2)}</td></tr>` : ''}
                     ${ultimoCalcolo.dettagli.festivo > 0 ? `<tr><td>Ind. Festiva:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.festivo.toFixed(2)}</td></tr>` : ''}
                     <tr><td>Ticket:</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.ticket.toFixed(2)}</td></tr>
-                    <tr><td>Scatti (rateo):</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.scatti.toFixed(2)}</td></tr>
+                    ${ultimoCalcolo.dettagli.scatti > 0 ? `<tr><td>Scatti (rateo):</td><td style="text-align:right">€ ${ultimoCalcolo.dettagli.scatti.toFixed(2)}</td></tr>` : ''}
                 </table>
             `;
             document.getElementById('btnPdf').style.display = 'block';
@@ -1585,6 +1585,7 @@
                 const monthlyParams = getParamsForDate(filtroMese + "-01");
                 contractBonus = 13 * (monthlyParams.pagaBase || 0);
                 valLordo += contractBonus;
+                totOrd += 13;
             }
 
             // --- RE-RENDER DASHBOARD DYNAMICALLY ---
