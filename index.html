@@ -1427,12 +1427,12 @@
             if (tipoTurno === 'pomeriggio' && currentParams.indemnities.pomeriggio) applyTurno = true;
             if (tipoTurno === 'notte' && currentParams.indemnities.notte) applyTurno = true;
 
-            if (applyTurno) {
+            if (applyTurno && inputFerie === 0) {
                 importoIndTurno = oreOridinarieCalcolate * (usedParams.indTurno || 0);
             }
 
             // New: Explicitly track indemnity hours for UI/PDF
-            let oreIndTurno = applyTurno ? oreOridinarieCalcolate : 0;
+            let oreIndTurno = (applyTurno && inputFerie === 0) ? oreOridinarieCalcolate : 0;
             let oreIndFestivo = 0;
 
             // New logic for ferie and permessi rate
@@ -2272,15 +2272,48 @@
             try {
                 // 1. Get App Totals for the month
                 const monthItems = storico.filter(i => i.data.startsWith(monthVal));
-                let appTotals = { oreOrd: 0, oreStra: 0, oreNott: 0, lordo: 0 };
+                let appTotals = {
+                    oreOrd: 0, oreStra: 0, oreNott: 0,
+                    oreFerie: 0, orePermessi: 0, oreMalattia: 0,
+                    totTicket: 0, oreIndTurno: 0, oreIndFestivo: 0,
+                    lordo: 0
+                };
+
                 monthItems.forEach(i => {
                     const hLavorate = parseFloat(i.oreLavorate) || 0;
                     const hStra = parseFloat(i.oreStraord) || 0;
+                    const hFerie = parseFloat(i.oreFerie) || 0;
+
                     appTotals.oreOrd += Math.max(0, hLavorate - hStra);
                     appTotals.oreStra += hStra;
                     appTotals.oreNott += parseFloat(i.oreNotturne) || 0;
-                    appTotals.lordo += parseFloat(i.totale) || 0;
+
+                    if (i.tipo === 'ferie') {
+                        appTotals.oreFerie += hFerie;
+                    } else if (i.tipo === 'malattia') {
+                        appTotals.oreMalattia += hFerie;
+                    } else {
+                        appTotals.orePermessi += hFerie;
+                    }
+
+                    if (i.dettagli && i.dettagli.ticket > 0) {
+                        appTotals.totTicket += 1;
+                    }
+
+                    appTotals.oreIndTurno += (parseFloat(i.oreIndTurno) || 0);
+                    appTotals.oreIndFestivo += (parseFloat(i.oreIndFestivo) || 0);
+
+                    // Gross calculation = total - ticket (consistent with dashboard)
+                    appTotals.lordo += (parseFloat(i.totale) || 0) - (parseFloat(i.dettagli ? i.dettagli.ticket : 0) || 0);
                 });
+
+                // Add 173h contract bonus if applicable
+                if (params.contractType === '173') {
+                    const monthlyParams = getParamsForDate(monthVal + "-01");
+                    const contractBonus = 13 * (parseFloat(monthlyParams.pagaBase) || 0);
+                    appTotals.lordo += contractBonus;
+                    appTotals.oreOrd += 13;
+                }
 
                 // 2. Extract Payslip Totals with Gemini
                 const base64Data = await readFileAsBase64(verifyFile);
@@ -2291,7 +2324,13 @@
                     - oreOrdinarie: (totale ore base lavorate nel mese)
                     - oreStraordinarie: (somma di tutte le ore straordinarie del mese)
                     - oreNotturne: (totale ore indennità/maggiorazione notturna)
-                    - lordoMensile: (totale competenze lorde del mese, es. circa 2000-3000)
+                    - oreFerie: (totale ore ferie godute)
+                    - orePermessi: (totale ore permessi/R.O.L. goduti)
+                    - oreMalattia: (totale ore malattia)
+                    - numeroTicket: (numero totale di ticket mensa o giorni con ticket)
+                    - oreIndennitaTurno: (totale ore maggiorazione turni)
+                    - oreIndennitaFestiva: (totale ore indennità festiva)
+                    - lordoMensile: (totale competenze lorde del mese)
                     
                     Usa il punto per i decimali. Rispondi SOLO con il JSON.
                 `;
@@ -2352,6 +2391,42 @@
                                 <td style="text-align:right;">${appTotals.oreNott.toFixed(2)}h</td>
                                 <td style="text-align:right;">${(payslipData.oreNotturne || 0).toFixed(2)}h</td>
                                 <td style="text-align:right;">${formatDiff(appTotals.oreNott, payslipData.oreNotturne || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ore Ferie</td>
+                                <td style="text-align:right;">${appTotals.oreFerie.toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.oreFerie || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreFerie, payslipData.oreFerie || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ore Permessi</td>
+                                <td style="text-align:right;">${appTotals.orePermessi.toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.orePermessi || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.orePermessi, payslipData.orePermessi || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ore Malattia</td>
+                                <td style="text-align:right;">${appTotals.oreMalattia.toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.oreMalattia || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreMalattia, payslipData.oreMalattia || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Num. Ticket</td>
+                                <td style="text-align:right;">${appTotals.totTicket}</td>
+                                <td style="text-align:right;">${payslipData.numeroTicket || 0}</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.totTicket, payslipData.numeroTicket || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ind. Turno</td>
+                                <td style="text-align:right;">${appTotals.oreIndTurno.toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.oreIndennitaTurno || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreIndTurno, payslipData.oreIndennitaTurno || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ind. Festiva</td>
+                                <td style="text-align:right;">${appTotals.oreIndFestivo.toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.oreIndennitaFestiva || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreIndFestivo, payslipData.oreIndennitaFestiva || 0)}</td>
                             </tr>
                             <tr style="font-weight:bold; background:#fff;">
                                 <td style="padding:10px;">Lordo Totale</td>
@@ -2466,27 +2541,63 @@
                             </tr>
                             <tr style="border-bottom:1px solid #f0f0f0;">
                                 <td style="padding:10px;">Ore Ordinarie</td>
-                                <td style="text-align:right;">${appTotals.oreOrd.toFixed(2)}h</td>
+                                <td style="text-align:right;">${(appTotals.oreOrd || 0).toFixed(2)}h</td>
                                 <td style="text-align:right;">${(payslipData.oreOrdinarie || 0).toFixed(2)}h</td>
-                                <td style="text-align:right;">${formatDiff(appTotals.oreOrd, payslipData.oreOrdinarie || 0)}</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreOrd || 0, payslipData.oreOrdinarie || 0)}</td>
                             </tr>
                             <tr style="border-bottom:1px solid #f0f0f0;">
                                 <td style="padding:10px;">Ore Straord.</td>
-                                <td style="text-align:right;">${appTotals.oreStra.toFixed(2)}h</td>
+                                <td style="text-align:right;">${(appTotals.oreStra || 0).toFixed(2)}h</td>
                                 <td style="text-align:right;">${(payslipData.oreStraordinarie || 0).toFixed(2)}h</td>
-                                <td style="text-align:right;">${formatDiff(appTotals.oreStra, payslipData.oreStraordinarie || 0)}</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreStra || 0, payslipData.oreStraordinarie || 0)}</td>
                             </tr>
                             <tr style="border-bottom:1px solid #f0f0f0;">
                                 <td style="padding:10px;">Ore Notturne</td>
-                                <td style="text-align:right;">${appTotals.oreNott.toFixed(2)}h</td>
+                                <td style="text-align:right;">${(appTotals.oreNott || 0).toFixed(2)}h</td>
                                 <td style="text-align:right;">${(payslipData.oreNotturne || 0).toFixed(2)}h</td>
-                                <td style="text-align:right;">${formatDiff(appTotals.oreNott, payslipData.oreNotturne || 0)}</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreNott || 0, payslipData.oreNotturne || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ore Ferie</td>
+                                <td style="text-align:right;">${(appTotals.oreFerie || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.oreFerie || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreFerie || 0, payslipData.oreFerie || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ore Permessi</td>
+                                <td style="text-align:right;">${(appTotals.orePermessi || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.orePermessi || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.orePermessi || 0, payslipData.orePermessi || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ore Malattia</td>
+                                <td style="text-align:right;">${(appTotals.oreMalattia || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.oreMalattia || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreMalattia || 0, payslipData.oreMalattia || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Num. Ticket</td>
+                                <td style="text-align:right;">${appTotals.totTicket || 0}</td>
+                                <td style="text-align:right;">${payslipData.numeroTicket || 0}</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.totTicket || 0, payslipData.numeroTicket || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ind. Turno</td>
+                                <td style="text-align:right;">${(appTotals.oreIndTurno || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.oreIndennitaTurno || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreIndTurno || 0, payslipData.oreIndennitaTurno || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ind. Festiva</td>
+                                <td style="text-align:right;">${(appTotals.oreIndFestivo || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.oreIndennitaFestiva || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreIndFestivo || 0, payslipData.oreIndennitaFestiva || 0)}</td>
                             </tr>
                             <tr style="font-weight:bold; background:#fff;">
                                 <td style="padding:10px;">Lordo Totale</td>
-                                <td style="text-align:right; color:var(--success);">€ ${appTotals.lordo.toFixed(2)}</td>
+                                <td style="text-align:right; color:var(--success);">€ ${(appTotals.lordo || 0).toFixed(2)}</td>
                                 <td style="text-align:right; color:var(--accent);">€ ${(payslipData.lordoMensile || 0).toFixed(2)}</td>
-                                <td style="text-align:right;">${formatDiff(appTotals.lordo, payslipData.lordoMensile || 0)}</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.lordo || 0, payslipData.lordoMensile || 0)}</td>
                             </tr>
                         </table>
                     </div>
