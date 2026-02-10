@@ -698,6 +698,14 @@
                 </div>
 
                 <div id="verificationResult" style="margin-top:20px;"></div>
+
+                <hr style="margin:25px 0; border:0; border-top:1px dashed #ddd;">
+
+                <h5 style="margin-bottom:10px;">🗂️ Storico Verifiche Salvate</h5>
+                <div id="savedVerificationsList"
+                    style="max-height: 200px; overflow-y: auto; background: #fafafa; border: 1px solid #eee; border-radius: 8px; padding: 10px;">
+                    <!-- List populated dynamically -->
+                </div>
             </div>
 
             <div style="padding: 20px; border-top: 2px solid #eee; background:#f8f9fa;">
@@ -798,7 +806,33 @@
                             dirty = true;
                         }
                     });
+
+                    // MIGRATION v2: Populate new indemnity fields if missing
+                    // We check if ANY item is missing the new fields.
+                    // If so, we trigger a recalculation of THOSE items.
+                    let needsRecalc = false;
+                    storico.forEach(item => {
+                        // Check if properties exist, even if 0.
+                        if (!item.hasOwnProperty('oreIndTurno') || !item.hasOwnProperty('oreIndFestivo')) {
+                            item.recalculateTarget = true;
+                            needsRecalc = true;
+                        }
+                    });
+
                     if (dirty) localStorage.setItem('storicoIBG', JSON.stringify(storico));
+
+                    if (needsRecalc) {
+                        console.log("Migration needed: recalculating indemnity fields...");
+                        // Delay to ensure all functions (ricalcolaStoricoInCorso) are defined
+                        setTimeout(() => {
+                            if (typeof ricalcolaStoricoInCorso === 'function') {
+                                ricalcolaStoricoInCorso();
+                                renderStorico();
+                                // Optional: Notify user
+                                // alert("Database aggiornato: statistiche indennità ricalcolate.");
+                            }
+                        }, 1000);
+                    }
                 }
                 renderStorico();
             }
@@ -1397,6 +1431,10 @@
                 importoIndTurno = oreOridinarieCalcolate * (usedParams.indTurno || 0);
             }
 
+            // New: Explicitly track indemnity hours for UI/PDF
+            let oreIndTurno = applyTurno ? oreOridinarieCalcolate : 0;
+            let oreIndFestivo = 0;
+
             // New logic for ferie and permessi rate
             let tassoFerie = pagaOraria; // Default to pagaBase
             if (tipoTurno === 'ferie' || tipoTurno === 'permesso') {
@@ -1411,6 +1449,7 @@
 
             if (tipoTurno === 'festivo' || tipoTurno === 'festivo_domenicale') {
                 importoFestivo = oreOridinarieCalcolate * (usedParams.indFestiva || 0);
+                oreIndFestivo = oreOridinarieCalcolate;
             }
 
             let importoScatti = 0;
@@ -1436,7 +1475,9 @@
                     festivo: importoFestivo
                 },
                 totale: totaleGiorno,
-                isWeekend: isWeekend
+                isWeekend: isWeekend,
+                oreIndTurno: oreIndTurno,
+                oreIndFestivo: oreIndFestivo
             };
         }
 
@@ -1537,26 +1578,17 @@
 
             // Stats Accumulators
             let totOrd = 0, totStra = 0, totNott = 0, totFerie = 0, totPermessi = 0, totMalattia = 0, totTicket = 0;
+            let totIndTurno = 0, totIndFestivo = 0;
+            let valOrd = 0, valStra = 0, valNott = 0, valFerie = 0, valPerm = 0, valMal = 0, valIndT = 0, valIndF = 0;
             let valLordo = 0, valTicketEuro = 0;
 
             // Stats Calc
             currentFilterItems.forEach(item => {
-                let hLavorate = parseFloat(item.oreLavorate);
-                if (isNaN(hLavorate)) hLavorate = 0;
-
-                let hStra = parseFloat(item.oreStraord);
-                if (isNaN(hStra)) hStra = 0;
-
-                let hNott = parseFloat(item.oreNotturne);
-                if (isNaN(hNott)) hNott = 0;
-
-                let hFerie = parseFloat(item.oreFerie);
-                if (isNaN(hFerie)) hFerie = 0;
-
+                let hLavorate = parseFloat(item.oreLavorate) || 0;
+                let hStra = parseFloat(item.oreStraord) || 0;
+                let hNott = parseFloat(item.oreNotturne) || 0;
+                let hFerie = parseFloat(item.oreFerie) || 0;
                 let hOrd = Math.max(0, hLavorate - hStra);
-
-                // Debug log
-                // console.log(`Item ${item.data}: Lav=${hLavorate}, Stra=${hStra}, Nott=${hNott}, Ferie=${hFerie}, Ord=${hOrd}`);
 
                 totOrd += hOrd;
                 totStra += hStra;
@@ -1564,15 +1596,30 @@
 
                 if (item.tipo === 'ferie') {
                     totFerie += hFerie;
+                    valFerie += (parseFloat(item.dettagli ? item.dettagli.ferie : 0) || 0);
                 } else if (item.tipo === 'malattia') {
                     totMalattia += hFerie;
+                    valMal += (parseFloat(item.dettagli ? item.dettagli.ferie : 0) || 0);
                 } else {
                     totPermessi += hFerie;
+                    valPerm += (parseFloat(item.dettagli ? item.dettagli.ferie : 0) || 0);
                 }
 
-                if (item.dettagli && item.dettagli.ticket > 0) {
-                    totTicket += 1;
-                    valTicketEuro += (parseFloat(item.dettagli.ticket) || 0);
+                // New Stats
+                totIndTurno += (parseFloat(item.oreIndTurno) || 0);
+                totIndFestivo += (parseFloat(item.oreIndFestivo) || 0);
+
+                if (item.dettagli) {
+                    valOrd += (parseFloat(item.dettagli.ord) || 0);
+                    valStra += (parseFloat(item.dettagli.stra) || 0);
+                    valNott += (parseFloat(item.dettagli.nott) || 0);
+                    valIndT += (parseFloat(item.dettagli.turn) || 0);
+                    valIndF += (parseFloat(item.dettagli.festivo) || 0);
+
+                    if (item.dettagli.ticket > 0) {
+                        totTicket += 1;
+                        valTicketEuro += (parseFloat(item.dettagli.ticket) || 0);
+                    }
                 }
 
                 // Gross calculation = total - ticket
@@ -1607,30 +1654,47 @@
                     <button onclick="filterByStat('ord')" style="background:#eaf2f8; border:1px solid #d6eaf8; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('ord')}">
                         <div style="font-size:0.75em; color:#555;">ORDINARIE</div>
                         <div style="font-weight:bold; color:#2980b9;">${totOrd.toFixed(1)}h</div>
+                        <div style="font-size:0.8em; color:#5dade2;">€${valOrd.toFixed(0)}</div>
                     </button>
                     <button onclick="filterByStat('stra')" style="background:#fef5e7; border:1px solid #fae5d3; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('stra')}">
                         <div style="font-size:0.75em; color:#555;">STRAORD.</div>
                         <div style="font-weight:bold; color:#e67e22;">${totStra.toFixed(1)}h</div>
+                        <div style="font-size:0.8em; color:#f5b041;">€${valStra.toFixed(0)}</div>
                     </button>
                     <button onclick="filterByStat('nott')" style="background:#f4ecf7; border:1px solid #ebdef0; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('nott')}">
                         <div style="font-size:0.75em; color:#555;">NOTTURNE</div>
                         <div style="font-weight:bold; color:#8e44ad;">${totNott.toFixed(1)}h</div>
+                        <div style="font-size:0.8em; color:#af7ac5;">€${valNott.toFixed(0)}</div>
                     </button>
                     <button onclick="filterByStat('ferie')" style="background:#e8f8f5; border:1px solid #d1f2eb; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('ferie')}">
                         <div style="font-size:0.75em; color:#555;">FERIE</div>
                         <div style="font-weight:bold; color:#27ae60;">${totFerie.toFixed(1)}h</div>
+                        <div style="font-size:0.8em; color:#48c9b0;">€${valFerie.toFixed(0)}</div>
                     </button>
                     <button onclick="filterByStat('permessi')" style="background:#fdf2e9; border:1px solid #fae5d3; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('permessi')}">
                         <div style="font-size:0.75em; color:#555;">PERMESSI</div>
                         <div style="font-weight:bold; color:#d35400;">${totPermessi.toFixed(1)}h</div>
+                        <div style="font-size:0.8em; color:#eb984e;">€${valPerm.toFixed(0)}</div>
                     </button>
                     <button onclick="filterByStat('malattia')" style="background:#fdedec; border:1px solid #fadbd8; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('malattia')}">
                         <div style="font-size:0.75em; color:#555;">MALATTIA</div>
                         <div style="font-weight:bold; color:#cb4335;">${totMalattia.toFixed(1)}h</div>
+                        <div style="font-size:0.8em; color:#ec7063;">€${valMal.toFixed(0)}</div>
                     </button>
                     <button onclick="filterByStat('ticket')" style="background:#f9ebea; border:1px solid #f2d7d5; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('ticket')}">
                         <div style="font-size:0.75em; color:#555;">TICKET</div>
                         <div style="font-weight:bold; color:#c0392b;">${totTicket}</div>
+                        <div style="font-size:0.8em; color:#e74c3c;">€${valTicketEuro.toFixed(0)}</div>
+                    </button>
+                    <button onclick="filterByStat('indTurno')" style="background:#e8daef; border:1px solid #d2b4de; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('indTurno')}">
+                        <div style="font-size:0.75em; color:#555;">IND. TURNO</div>
+                        <div style="font-weight:bold; color:#8e44ad;">${totIndTurno.toFixed(1)}h</div>
+                        <div style="font-size:0.8em; color:#af7ac5;">€${valIndT.toFixed(0)}</div>
+                    </button>
+                    <button onclick="filterByStat('indFestivo')" style="background:#fcf3cf; border:1px solid #f9e79f; padding:10px; border-radius:8px; cursor:pointer; text-align:center; ${getStyle('indFestivo')}">
+                        <div style="font-size:0.75em; color:#555;">IND. FESTIVA</div>
+                        <div style="font-weight:bold; color:#d4ac0d;">${totIndFestivo.toFixed(1)}h</div>
+                        <div style="font-size:0.8em; color:#f4d03f;">€${valIndF.toFixed(0)}</div>
                     </button>
                     ${params.contractType === '173' && currentSearchMode === 'month' ? `
                     <div style="background:#f0f7ff; border:1px solid #d0e3ff; padding:10px; border-radius:8px; text-align:center; display:flex; flex-direction:column; justify-content:center;">
@@ -1830,111 +1894,144 @@
         }
 
         function generaReportPDF() {
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF();
+            try {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
 
-            const filtroMese = document.getElementById('filtroMese').value;
-            const filtroDal = document.getElementById('filtroDal').value;
-            const filtroAl = document.getElementById('filtroAl').value;
+                const filtroMese = document.getElementById('filtroMese').value;
+                const filtroDal = document.getElementById('filtroDal').value;
+                const filtroAl = document.getElementById('filtroAl').value;
 
-            let title = "REPORT TURNI";
-            let visibleItems = storico;
+                let title = "REPORT TURNI";
+                let visibleItems = Array.isArray(storico) ? [...storico] : [];
 
-            if (currentSearchMode === 'month') {
-                title += ` - ${filtroMese}`;
-                visibleItems = storico.filter(item => item.data.startsWith(filtroMese));
-            } else {
-                title += ` (${filtroDal || '...'} / ${filtroAl || '...'})`;
-                if (filtroDal) visibleItems = visibleItems.filter(item => item.data >= filtroDal);
-                if (filtroAl) visibleItems = visibleItems.filter(item => item.data <= filtroAl);
-            }
-
-            visibleItems.sort((a, b) => new Date(a.data) - new Date(b.data)); // Asc for report
-
-            if (visibleItems.length === 0) { alert("Nessun turno nel periodo selezionato."); return; }
-
-            doc.setFontSize(18); doc.text(title, 14, 20);
-            doc.setFontSize(10);
-
-            let y = 30;
-            let totalMonth = 0;
-            let totalHours = 0;
-
-            // Header
-            doc.setFont(undefined, 'bold');
-            doc.text("Data", 14, y);
-            doc.text("Turno", 40, y);
-            doc.text("Ore", 80, y);
-            doc.text("Importo", 110, y);
-            doc.text("Dettagli", 140, y);
-            doc.line(14, y + 2, 195, y + 2);
-            y += 10;
-            doc.setFont(undefined, 'normal');
-
-            visibleItems.forEach(item => {
-                totalMonth += item.totale;
-                totalHours += parseFloat(item.oreLavorate);
-
-                // Page break check
-                if (y > 270) { doc.addPage(); y = 20; }
-
-                doc.text(item.data.split('-').reverse().join('/'), 14, y);
-                doc.text(item.tipo.substring(0, 10), 40, y);
-                doc.text(`${item.oreLavorate}h`, 80, y);
-                doc.text(`€ ${(item.totale || 0).toFixed(2)}`, 110, y);
-
-                // Short breakdown
-                let details = [];
-                if (item.dettagli && item.dettagli.stra > 0) details.push(`Str:€${(item.dettagli.stra || 0).toFixed(0)}`);
-                if (item.dettagli && item.dettagli.nott > 0) details.push(`Not:€${(item.dettagli.nott || 0).toFixed(0)}`);
-                if (item.dettagli && item.dettagli.ferie > 0) {
-                    const lbl = item.tipo === 'malattia' ? 'Mal' : (item.tipo === 'ferie' ? 'Fer' : 'Per');
-                    details.push(`${lbl}:€${(item.dettagli.ferie || 0).toFixed(0)}`);
+                if (currentSearchMode === 'month') {
+                    if (!filtroMese) { alert("Seleziona un mese."); return; }
+                    title += ` - ${filtroMese}`;
+                    visibleItems = visibleItems.filter(item => item.data && item.data.startsWith(filtroMese));
+                } else {
+                    title += ` (${filtroDal || '...'} / ${filtroAl || '...'})`;
+                    if (filtroDal) visibleItems = visibleItems.filter(item => item.data >= filtroDal);
+                    if (filtroAl) visibleItems = visibleItems.filter(item => item.data <= filtroAl);
                 }
-                doc.text(details.join(', '), 140, y);
 
-                y += 7;
-            });
+                visibleItems.sort((a, b) => new Date(a.data) - new Date(b.data));
 
-            // Summary
-            doc.line(14, y, 195, y);
-            y += 10;
-            doc.setFont(undefined, 'bold');
-            doc.text(`TOTALE: € ${totalMonth.toFixed(2)}`, 14, y);
+                if (visibleItems.length === 0) { alert("Nessun turno nel periodo selezionato."); return; }
 
-            // Stats for report calc
-            let rTotOrd = 0, rTotStra = 0, rTotNott = 0, rTotFerie = 0, rTotPerm = 0, rTotMal = 0;
-            visibleItems.forEach(item => {
-                let hLavorate = parseFloat(item.oreLavorate) || 0;
-                let hStra = parseFloat(item.oreStraord) || 0;
-                let hNott = parseFloat(item.oreNotturne) || 0;
-                let hFerie = parseFloat(item.oreFerie) || 0;
-                let hOrd = Math.max(0, hLavorate - hStra);
-                rTotOrd += hOrd; rTotStra += hStra; rTotNott += hNott;
+                // --- 1. PRE-CALCULATE STATS ---
+                let rTotOrd = 0, rTotStra = 0, rTotNott = 0, rTotFerie = 0, rTotPerm = 0, rTotMal = 0;
+                let rTotIndTurno = 0, rTotIndFestivo = 0, rTotalMoney = 0;
 
-                if (item.tipo === 'ferie') rTotFerie += hFerie;
-                else if (item.tipo === 'malattia') rTotMal += hFerie;
-                else rTotPerm += hFerie;
-            });
+                visibleItems.forEach(item => {
+                    let hLavorate = parseFloat(item.oreLavorate) || 0;
+                    let hStra = parseFloat(item.oreStraord) || 0;
+                    let hNott = parseFloat(item.oreNotturne) || 0;
+                    let hFerie = parseFloat(item.oreFerie) || 0;
+                    let hOrd = Math.max(0, hLavorate - hStra);
 
-            // Hours Breakdown Table
-            y += 15;
-            doc.setFontSize(11);
-            doc.text("Riepilogo Ore Mese:", 14, y);
-            y += 8;
-            doc.setFontSize(10); doc.setFont(undefined, 'normal');
+                    rTotOrd += hOrd;
+                    rTotStra += hStra;
+                    rTotNott += hNott;
+                    rTotIndTurno += (parseFloat(item.oreIndTurno) || 0);
+                    rTotIndFestivo += (parseFloat(item.oreIndFestivo) || 0);
 
-            doc.text(`Ordinarie:  ${rTotOrd.toFixed(1)} h`, 14, y);
-            doc.text(`Straordinarie:  ${rTotStra.toFixed(1)} h`, 70, y);
-            y += 6;
-            doc.text(`Notturne:   ${rTotNott.toFixed(1)} h`, 14, y);
-            doc.text(`Ferie:  ${rTotFerie.toFixed(1)} h`, 70, y);
-            y += 6;
-            doc.text(`Permessi:   ${rTotPerm.toFixed(1)} h`, 14, y);
-            doc.text(`Malattia:  ${rTotMal.toFixed(1)} h`, 70, y);
+                    if (item.tipo === 'ferie') rTotFerie += hFerie;
+                    else if (item.tipo === 'malattia') rTotMal += hFerie;
+                    else if (item.tipo === 'permesso' || hFerie > 0) rTotPerm += hFerie;
 
-            const filename = currentSearchMode === 'month' ? `Report_Turni_${filtroMese}.pdf` : `Report_Turni_Ricerca.pdf`;
-            doc.save(filename);
+                    rTotalMoney += (parseFloat(item.totale) || 0);
+                });
+
+                // Add contract bonus
+                if (params.contractType === '173' && currentSearchMode === 'month') {
+                    const monthlyParams = getParamsForDate(filtroMese + "-01");
+                    const contractBonus = 13 * (parseFloat(monthlyParams.pagaBase) || 0);
+                    rTotalMoney += contractBonus;
+                    rTotOrd += 13;
+                }
+
+                // --- 2. RENDER SUMMARY AT TOP ---
+                doc.setFontSize(18); doc.text(title, 14, 20);
+
+                doc.setFontSize(11);
+                doc.setFont(undefined, 'bold');
+                doc.text("RIEPILOGO MENSILE / PERIODO", 14, 30);
+                doc.setFont(undefined, 'normal');
+                doc.setFontSize(10);
+
+                let ySum = 38;
+                doc.text(`Ore Ordinarie:  ${rTotOrd.toFixed(1)} h`, 14, ySum);
+                doc.text(`Ore Straordinarie:  ${rTotStra.toFixed(1)} h`, 14, ySum + 6);
+                doc.text(`Ore Notturne:   ${rTotNott.toFixed(1)} h`, 14, ySum + 12);
+                doc.text(`Indennità Turno: ${rTotIndTurno.toFixed(1)} h`, 14, ySum + 18);
+
+                doc.text(`Ferie:  ${rTotFerie.toFixed(1)} h`, 80, ySum);
+                doc.text(`Permessi:   ${rTotPerm.toFixed(1)} h`, 80, ySum + 6);
+                doc.text(`Malattia:  ${rTotMal.toFixed(1)} h`, 80, ySum + 12);
+                doc.text(`Indennità Festiva: ${rTotIndFestivo.toFixed(1)} h`, 80, ySum + 18);
+
+                doc.setDrawColor(0);
+                doc.setFillColor(240, 240, 240);
+                doc.rect(140, 32, 53, 22, 'F');
+                doc.setFont(undefined, 'bold');
+                doc.text("TOTAL LORDO", 143, 39);
+                doc.setFontSize(13);
+                doc.setTextColor(0, 100, 0);
+                doc.text(`EUR ${rTotalMoney.toFixed(2)}`, 143, 49);
+                doc.setTextColor(0);
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'normal');
+
+                doc.setDrawColor(200);
+                doc.line(14, 62, 195, 62);
+
+                // --- 3. RENDER SHIFT HISTORY ---
+                doc.setFontSize(12);
+                doc.setFont(undefined, 'bold');
+                doc.text("Dettaglio Turni", 14, 72);
+                doc.setFontSize(10);
+
+                let y = 82;
+                doc.text("Data", 14, y);
+                doc.text("Turno", 40, y);
+                doc.text("Ore", 80, y);
+                doc.text("Importo", 110, y);
+                doc.text("Dettagli", 140, y);
+                doc.line(14, y + 2, 195, y + 2);
+                y += 10;
+                doc.setFont(undefined, 'normal');
+
+                visibleItems.forEach(item => {
+                    if (y > 275) { doc.addPage(); y = 20; }
+
+                    const dateDisp = item.data ? item.data.split('-').reverse().join('/') : '??/??/????';
+                    doc.text(dateDisp, 14, y);
+                    doc.text(String(item.tipo).substring(0, 10), 40, y);
+                    doc.text(`${item.oreLavorate}h`, 80, y);
+                    doc.text(`€ ${(parseFloat(item.totale) || 0).toFixed(2)}`, 110, y);
+
+                    let details = [];
+                    if (item.dettagli) {
+                        if (item.dettagli.stra > 0) details.push(`S:€${Math.round(item.dettagli.stra)}`);
+                        if (item.dettagli.nott > 0) details.push(`N:€${Math.round(item.dettagli.nott)}`);
+                        if (item.dettagli.turn > 0) details.push(`T:€${Math.round(item.dettagli.turn)}`);
+                        if (item.dettagli.festivo > 0) details.push(`F:€${Math.round(item.dettagli.festivo)}`);
+                    }
+
+                    let detailStr = details.join(', ');
+                    if (detailStr.length > 35) detailStr = detailStr.substring(0, 32) + "...";
+                    doc.text(detailStr, 140, y);
+                    y += 7;
+                });
+
+                doc.line(14, y, 195, y);
+                const filename = currentSearchMode === 'month' ? `Report_${filtroMese}.pdf` : `Report_Ricerca.pdf`;
+                doc.save(filename);
+            } catch (err) {
+                console.error(err);
+                alert("Errore generazione PDF: " + err.message);
+            }
         }
 
 
@@ -2026,14 +2123,22 @@
         }
 
         function ricalcolaStoricoInCorso() {
+            let changed = false;
             storico.forEach(item => {
                 if (item.recalculateTarget) {
                     const orari = item.orario.split(' - ');
+                    // Robust check
+                    let hInizio = "00:00", hFine = "00:00";
+                    if (orari.length === 2) {
+                        hInizio = orari[0].trim();
+                        hFine = orari[1].trim();
+                    }
+
                     const input = {
                         tipoTurno: item.tipo,
                         dataStr: item.data,
-                        hInizioStr: orari[0].trim(),
-                        hFineStr: orari[1].trim(),
+                        hInizioStr: hInizio,
+                        hFineStr: hFine,
                         inputStraord: item.oreStraord - (item.isWeekend ? (parseFloat(item.oreLavorate) || 0) : 0),
                         inputFerie: item.oreFerie,
                         usedParams: getParamsForDate(item.data),
@@ -2041,15 +2146,22 @@
                     };
 
                     const nuovoCalcolo = calcolaValori(input);
+                    // Preserve ID
+                    nuovoCalcolo.id = item.id;
                     Object.assign(item, nuovoCalcolo);
                     delete item.recalculateTarget;
+                    changed = true;
                 }
             });
-            localStorage.setItem('storicoIBG', JSON.stringify(storico));
-            if (db) {
-                storico.forEach(item => {
-                    db.collection("turni").doc(item.id).set(item);
-                });
+
+            if (changed) {
+                localStorage.setItem('storicoIBG', JSON.stringify(storico));
+                if (db) {
+                    storico.forEach(item => {
+                        // Optimally only update changed ones, but batch is easier
+                        db.collection("turni").doc(item.id).set(item);
+                    });
+                }
             }
         }
 
@@ -2210,9 +2322,12 @@
                     return `<span style="color:${color}; font-weight:bold;">${(diff > 0 ? "+" : "") + diff.toFixed(2)}</span>`;
                 };
 
-                resultDiv.innerHTML = `
+                const resultHTML = `
                     <div style="background:#f8f9fa; border-radius:12px; padding:20px; border:1px solid #ddd; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
-                        <h5 style="margin-top:0; color:var(--primary); font-size:1.1em;">📊 Risultato Confronto (${monthVal})</h5>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <h5 style="margin-top:0; color:var(--primary); font-size:1.1em;">📊 Risultato Confronto (${monthVal})</h5>
+                            <button onclick="salvaVerificaCorrente()" style="background:var(--success); color:white; border:none; padding:5px 10px; border-radius:5px; cursor:pointer;">💾 Salva Risultato</button>
+                        </div>
                         <table style="width:100%; font-size:0.9em; border-collapse:collapse; margin-top:10px;">
                             <tr style="border-bottom:2px solid #eee;">
                                 <th style="text-align:left; padding:10px; color:#666;">Dato</th>
@@ -2251,6 +2366,18 @@
                     </div>
                 `;
 
+                resultDiv.innerHTML = resultHTML;
+
+                // Store temporarily for saving
+                lastVerificationResult = {
+                    id: Date.now().toString(),
+                    month: monthVal,
+                    appTotals: appTotals,
+                    payslipData: payslipData,
+                    timestamp: new Date().toISOString(),
+                    html: resultHTML // We'll reconstruct it but saving data is cleaner
+                };
+
             } catch (error) {
                 console.error(error);
                 alert("❌ Errore durante il confronto: " + error.message);
@@ -2260,6 +2387,121 @@
                 loading.style.display = "none";
             }
         }
+
+        let lastVerificationResult = null;
+        let verificheSalvate = [];
+
+        function initVerifications() {
+            const saved = localStorage.getItem('verificheIBG');
+            if (saved) {
+                verificheSalvate = JSON.parse(saved);
+            }
+            renderVerificheSalvate();
+        }
+
+        function salvaVerificaCorrente() {
+            if (!lastVerificationResult) return;
+            // Check if exists for this month
+            const existingIdx = verificheSalvate.findIndex(v => v.month === lastVerificationResult.month);
+            if (existingIdx >= 0) {
+                if (!confirm("Esiste già una verifica salvata per questo mese. Sovrascrivere?")) return;
+                verificheSalvate[existingIdx] = lastVerificationResult;
+            } else {
+                verificheSalvate.push(lastVerificationResult);
+            }
+
+            localStorage.setItem('verificheIBG', JSON.stringify(verificheSalvate));
+            renderVerificheSalvate();
+            alert("✅ Verifica salvata nello storico.");
+        }
+
+        function renderVerificheSalvate() {
+            const list = document.getElementById('savedVerificationsList');
+            if (!list) return;
+
+            verificheSalvate.sort((a, b) => b.month.localeCompare(a.month)); // Desc month
+
+            if (verificheSalvate.length === 0) {
+                list.innerHTML = '<p style="text-align:center; color:#999; font-size:0.85em;">Nessuna verifica salvata.</p>';
+                return;
+            }
+
+            list.innerHTML = verificheSalvate.map(v => `
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding:8px 0;">
+                    <div style="cursor:pointer;" onclick="loadVerification('${v.id}')">
+                        <span style="font-weight:bold; color:var(--primary);">${v.month}</span>
+                        <span style="font-size:0.8em; color:#999; margin-left:10px;">${new Date(v.timestamp).toLocaleDateString()}</span>
+                    </div>
+                    <button onclick="deleteVerification('${v.id}')" style="background:var(--danger); color:white; border:none; padding:2px 8px; border-radius:4px; font-size:10px; cursor:pointer;">🗑️</button>
+                </div>
+             `).join('');
+        }
+
+        function loadVerification(id) {
+            const v = verificheSalvate.find(i => i.id === id);
+            if (!v) return;
+
+            // Re-render HTML logic (simplified version of resultHTML construction)
+            const appTotals = v.appTotals;
+            const payslipData = v.payslipData;
+            const formatDiff = (app, pay) => {
+                const diff = app - pay;
+                const color = Math.abs(diff) < 0.1 ? "var(--success)" : "var(--danger)";
+                return `<span style="color:${color}; font-weight:bold;">${(diff > 0 ? "+" : "") + diff.toFixed(2)}</span>`;
+            };
+
+            const resultDiv = document.getElementById('verificationResult');
+            resultDiv.innerHTML = `
+                <div style="background:#fff3e0; border-radius:12px; padding:20px; border:1px solid #ffe0b2; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <h5 style="margin-top:0; color:#e65100; font-size:1.1em;">📂 Verifica Salvata: ${v.month}</h5>
+                            <span style="font-size:0.8em; color:#666;">Caricata da storico</span>
+                        </div>
+                        <table style="width:100%; font-size:0.9em; border-collapse:collapse; margin-top:10px;">
+                            <tr style="border-bottom:2px solid #eee;">
+                                <th style="text-align:left; padding:10px; color:#666;">Dato</th>
+                                <th style="text-align:right; padding:10px; color:#666;">App</th>
+                                <th style="text-align:right; padding:10px; color:#666;">Busta Paga</th>
+                                <th style="text-align:right; padding:10px; color:#666;">Diff.</th>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ore Ordinarie</td>
+                                <td style="text-align:right;">${appTotals.oreOrd.toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.oreOrdinarie || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreOrd, payslipData.oreOrdinarie || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ore Straord.</td>
+                                <td style="text-align:right;">${appTotals.oreStra.toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.oreStraordinarie || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreStra, payslipData.oreStraordinarie || 0)}</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:10px;">Ore Notturne</td>
+                                <td style="text-align:right;">${appTotals.oreNott.toFixed(2)}h</td>
+                                <td style="text-align:right;">${(payslipData.oreNotturne || 0).toFixed(2)}h</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.oreNott, payslipData.oreNotturne || 0)}</td>
+                            </tr>
+                            <tr style="font-weight:bold; background:#fff;">
+                                <td style="padding:10px;">Lordo Totale</td>
+                                <td style="text-align:right; color:var(--success);">€ ${appTotals.lordo.toFixed(2)}</td>
+                                <td style="text-align:right; color:var(--accent);">€ ${(payslipData.lordoMensile || 0).toFixed(2)}</td>
+                                <td style="text-align:right;">${formatDiff(appTotals.lordo, payslipData.lordoMensile || 0)}</td>
+                            </tr>
+                        </table>
+                    </div>
+             `;
+        }
+
+        function deleteVerification(id) {
+            if (!confirm("Eliminare questa verifica salvata?")) return;
+            verificheSalvate = verificheSalvate.filter(v => v.id !== id);
+            localStorage.setItem('verificheIBG', JSON.stringify(verificheSalvate));
+            renderVerificheSalvate();
+        }
+
+        // Init on load
+        window.addEventListener('load', initVerifications);
     </script>
 </body>
 
