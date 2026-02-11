@@ -266,6 +266,13 @@
                 </select>
             </div>
 
+            <div class="input-group" id="pausaPranzoDiv"
+                style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
+                <input type="checkbox" id="pausaPranzo" style="width: 20px; height: 20px; cursor: pointer;">
+                <label for="pausaPranzo" style="margin-bottom: 0; cursor: pointer;">Pausa Pranzo (No indennità
+                    turno)</label>
+            </div>
+
             <div id="orariDiv" class="input-group" style="display:flex; gap:10px;">
                 <div style="flex:1">
                     <label>Inizio</label>
@@ -1343,7 +1350,7 @@
         // ========== CALCOLO TURNI ==========
         // ========== CALCOLO TURNI ==========
         function calcolaValori(input) {
-            const { tipoTurno, dataStr, hInizioStr, hFineStr, inputStraord, inputFerie, usedParams, currentParams } = input;
+            const { tipoTurno, dataStr, hInizioStr, hFineStr, inputStraord, inputFerie, usedParams, currentParams, pausaPranzo } = input;
             const dateObj = new Date(dataStr);
             const isWeekend = (dateObj.getDay() === 0 || dateObj.getDay() === 6);
 
@@ -1427,12 +1434,12 @@
             if (tipoTurno === 'pomeriggio' && currentParams.indemnities.pomeriggio) applyTurno = true;
             if (tipoTurno === 'notte' && currentParams.indemnities.notte) applyTurno = true;
 
-            if (applyTurno && inputFerie === 0) {
+            if (applyTurno && inputFerie === 0 && !pausaPranzo) {
                 importoIndTurno = oreOridinarieCalcolate * (usedParams.indTurno || 0);
             }
 
             // New: Explicitly track indemnity hours for UI/PDF
-            let oreIndTurno = (applyTurno && inputFerie === 0) ? oreOridinarieCalcolate : 0;
+            let oreIndTurno = (applyTurno && inputFerie === 0 && !pausaPranzo) ? oreOridinarieCalcolate : 0;
             let oreIndFestivo = 0;
 
             // New logic for ferie and permessi rate
@@ -1459,6 +1466,7 @@
             return {
                 data: dataStr,
                 tipo: tipoTurno,
+                pausaPranzo: pausaPranzo,
                 orario: `${hInizioStr} - ${hFineStr}`,
                 oreLavorate: diffOre,
                 oreStraord: oreStraordinarieCalcolate,
@@ -1489,6 +1497,7 @@
                 hFineStr: document.getElementById('fine').value,
                 inputStraord: parseFloat(document.getElementById('oreStraordinario').value) || 0,
                 inputFerie: parseFloat(document.getElementById('oreFerie').value) || 0,
+                pausaPranzo: document.getElementById('pausaPranzo').checked,
                 usedParams: getParamsForDate(document.getElementById('dataTurno').value),
                 currentParams: params
             };
@@ -1847,6 +1856,7 @@
             // Reset fields
             document.getElementById('oreStraordinario').value = 0;
             document.getElementById('oreFerie').value = 0;
+            document.getElementById('pausaPranzo').checked = false;
             document.getElementById('tipoTurno').value = 'mattina';
             impostaOrariTurno(); // Reset times
         }
@@ -1885,6 +1895,7 @@
 
             document.getElementById('oreStraordinario').value = item.oreStraord || 0;
             document.getElementById('oreFerie').value = item.oreFerie || 0;
+            document.getElementById('pausaPranzo').checked = !!item.pausaPranzo;
 
             // Trigger Calc to show preview
             eseguiCalcolo();
